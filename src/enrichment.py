@@ -125,22 +125,26 @@ class EnrichmentService:
 
         sig_id = self._extract_signature_id(threat_id)
 
+        # 若 threat_id 已是完整格式 "Name(ID)"（JMTE 加入 signature_name 後），
+        # 用完整字串做精確比對；否則用 wildcard 比對 ID 數字
+        if "(" in threat_id:
+            sig_query = f'alert_signature:"{threat_id}"'
+        else:
+            sig_query = f'alert_signature:*{sig_id}*'
+
         try:
             async with httpx.AsyncClient(verify=False) as client:
-                # 同 source IP + 同 signature（wildcard 相容 "Name(ID)" 格式）
                 same_src_same_sig = await self._graylog_count(
                     client,
-                    f'source_ip:"{source_ip}" AND alert_signature:*{sig_id}*',
+                    f'source_ip:"{source_ip}" AND {sig_query}',
                 )
-                # 同 source IP + 其他 signature（掃描偵測）
                 same_src_other_sig = await self._graylog_count(
                     client,
-                    f'source_ip:"{source_ip}" AND NOT alert_signature:*{sig_id}*',
+                    f'source_ip:"{source_ip}" AND NOT {sig_query}',
                 )
-                # 同 destination IP + 同 signature
                 same_dst_same_sig = await self._graylog_count(
                     client,
-                    f'destination_ip:"{destination_ip}" AND alert_signature:*{sig_id}*',
+                    f'destination_ip:"{destination_ip}" AND {sig_query}',
                 )
 
             return {

@@ -1,15 +1,31 @@
 # Graylog Threat Analyzer 設定檔
 # 複製此檔為 config.yaml 並填入實際值
 #
-# ★ Graylog Custom HTTP Notification JMTE 模板建議補充欄位（加入 fields 區塊）：
-#   "severity":          "${event.fields.Severity}",        # 影響 informational 判斷規則
-#   "signature_name":    "${event.fields.Signature}",       # 完整 signature 文字名稱
-#   "source_zone":       "${event.fields.FromZone}",
-#   "destination_zone":  "${event.fields.ToZone}",
-#   "rule_name":         "${event.fields.SecurityRule}",
+# ★ Graylog Event Definition 建議新增的 Field Extraction（在「Fields」頁籤）
+#   以下是經原始 PAN THREAT 訊息欄位名稱確認後的對應關係：
+#
+#   Event Definition Field Name  │ 原始 Graylog Stream 欄位名稱
+#   ─────────────────────────────┼───────────────────────────────────────────
+#   Severity                     │ vendor_alert_severity     ← 影響 informational 判斷
+#   SignatureName                 │ alert_signature           ← 完整 "Name(ID)" 格式
+#   SourceZone                   │ source_zone
+#   DestinationZone              │ destination_zone
+#   RuleName                     │ rule_name
+#   Protocol                     │ network_transport
+#   Direction                    │ pan_alert_direction
+#
+# ★ JMTE Body Template 對應新增（放在 "fields" 物件內，與現有欄位並列）：
+#   "severity":          "${event.fields.Severity}",
+#   "signature_name":    "${event.fields.SignatureName}",
+#   "source_zone":       "${event.fields.SourceZone}",
+#   "destination_zone":  "${event.fields.DestinationZone}",
+#   "rule_name":         "${event.fields.RuleName}",
 #   "transport":         "${event.fields.Protocol}",
 #   "direction":         "${event.fields.Direction}",
-#   （欄位名稱視你的 Graylog pipeline rules 而定，請自行確認）
+#
+# 最重要的是 severity 和 signature_name：
+#   severity      → 啟用「informational+alert → normal」判斷規則
+#   signature_name → 讓 triage 和 email 顯示完整 signature 文字，改善 LLM 上下文
 
 server:
   host: "0.0.0.0"

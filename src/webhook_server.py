@@ -48,35 +48,43 @@ def _normalize_event_fields(payload: GraylogEvent) -> dict:
     """
     將 Graylog Custom HTTP Notification 的 fields 轉成程式內部通用格式。
 
-    欄位對照（JMTE template → 內部欄位名稱）：
+    欄位對照（JMTE template key → 內部欄位名稱）：
       source_address       → source_ip
       destination_address  → destination_ip
       source_user          → source_user_name
       destination_user     → destination_user_name
       action               → vendor_event_action
-      threat_id            → alert_signature  （目前只有 ID，無簽名文字名稱）
+      threat_id            → threat_id  （ThreatID，純數字，如 "92322"）
+      signature_name       → alert_signature + signature_name
+                             （建議加入 JMTE：event.fields.alert_signature）
       rcvss                → RCVSS
 
-    ★ 以下欄位目前未在 JMTE template 中，值會為空字串：
-      severity（vendor_alert_severity）— 影響規則 2（informational 判斷）
-      signature_name — 影響 LLM 上下文品質
-      source_zone / destination_zone / rule_name / network_transport
-      建議在 JMTE template 的 fields 區塊加入對應的 ${event.fields.XXX}。
+    建議在 Graylog Event Definition 的「Fields」區塊新增以下 field extraction，
+    然後在 JMTE Body Template 的 "fields" 物件中加入對應鍵值（詳見 config.example.yaml）：
+      severity / signature_name / source_zone / destination_zone /
+      rule_name / transport / direction
     """
     f = payload.fields
+
+    # alert_signature：優先使用完整格式 "Name(ID)"（signature_name），
+    # 若尚未加入 JMTE 則 fallback 到純數字 threat_id
+    signature_name = f.get("signature_name", "")      # e.g. "NTLMSSP Detection(92322)"
+    threat_id = f.get("threat_id", "")                # e.g. "92322"
+    alert_signature = signature_name or threat_id     # 優先完整格式，供 triage 和 email 顯示
+
     return {
         # 識別
         "event_uid":            payload.event_id or "",
         "event_timestamp":      payload.event_timestamp or "",
         # 威脅
-        "alert_signature":      f.get("threat_id", ""),
-        "threat_id":            f.get("threat_id", ""),
-        "signature_name":       f.get("signature_name", ""),   # 建議加入 JMTE
+        "alert_signature":      alert_signature,
+        "threat_id":            threat_id,
+        "signature_name":       signature_name or (f"ThreatID {threat_id}" if threat_id else "unknown"),
         "threat_content_type":  f.get("threat_content_type", ""),
         "file_name":            f.get("file_name", ""),
         # 行動 / 嚴重性
         "vendor_event_action":  f.get("action", ""),
-        "vendor_alert_severity": f.get("severity", ""),        # 建議加入 JMTE
+        "vendor_alert_severity": f.get("severity", ""),   # 加入 JMTE 後才有值
         "RCVSS":                f.get("rcvss", ""),
         # 來源
         "source_ip":            f.get("source_address", ""),
@@ -85,14 +93,14 @@ def _normalize_event_fields(payload: GraylogEvent) -> dict:
         # 目標
         "destination_ip":       f.get("destination_address", ""),
         "destination_user_name": f.get("destination_user", ""),
-        "destination_port":     f.get("destination_port", ""),
-        # 網路環境
+        "destination_port":     str(f.get("destination_port", "")),
+        # 網路環境（加入 JMTE 後才有值）
         "application_name":     f.get("application", ""),
-        "network_transport":    f.get("transport", ""),        # 建議加入 JMTE
-        "pan_alert_direction":  f.get("direction", ""),        # 建議加入 JMTE
-        "source_zone":          f.get("source_zone", ""),      # 建議加入 JMTE
-        "destination_zone":     f.get("destination_zone", ""), # 建議加入 JMTE
-        "rule_name":            f.get("rule_name", ""),        # 建議加入 JMTE
+        "network_transport":    f.get("transport", ""),
+        "pan_alert_direction":  f.get("direction", ""),
+        "source_zone":          f.get("source_zone", ""),
+        "destination_zone":     f.get("destination_zone", ""),
+        "rule_name":            f.get("rule_name", ""),
         # 防火牆
         "firewall":             f.get("firewall", ""),
     }
