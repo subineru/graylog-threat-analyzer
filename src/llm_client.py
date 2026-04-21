@@ -55,16 +55,24 @@ class LLMClient:
     def _rule_based_triage(self, enriched: dict) -> TriageVerdict:
         """
         Phase 1 固定規則研判。
-        提供基本的判斷邏輯，讓整個 pipeline 先跑起來。
+        規則優先順序由上到下，命中第一條即回傳。
         """
         summary = enriched.get("event_summary", {})
+        asset = enriched.get("asset_context", {})
+        freq = enriched.get("frequency_context", {})
+
         action = summary.get("action", "")
         severity = summary.get("severity", "")
         source_ip = summary.get("source_ip", "")
-        rcvss = summary.get("rcvss", "")
-        freq = enriched.get("frequency_context", {})
+        sig_name = summary.get("signature_name", "")
 
-        # 規則 1: PA 已阻擋的外部攻擊 → 大多為已知攻擊已防禦
+        src_asset = asset.get("source_asset", {})
+        dst_asset = asset.get("destination_asset", {})
+        src_role = src_asset.get("role", "unknown")
+        dst_role = dst_asset.get("role", "unknown")
+        src_known = src_asset.get("hostname", "unknown") != "unknown"
+
+        # 規則 1: PA 已阻擋的外部攻擊 → 已防禦的已知攻擊
         if action in ("drop", "block-ip", "reset-both") and not self._is_internal(source_ip):
             return TriageVerdict(
                 verdict="false_positive",
@@ -73,16 +81,48 @@ class LLMClient:
                 recommended_action="suppress",
             )
 
-        # 規則 2: informational + alert → 通常為偵測型，正常行為
+        # 規則 2: informational + alert → 偵測型規則，正常行為
         if severity == "informational" and action == "alert":
             return TriageVerdict(
                 verdict="normal",
                 confidence="medium",
-                reasoning=f"Severity 為 informational，PA 僅 alert 未阻擋，大多為正常偵測。",
+                reasoning="Severity 為 informational，PA 僅 alert 未阻擋，大多為正常偵測。",
                 recommended_action="monitor",
             )
 
-        # 規則 3: 同一來源短時間觸發多種 signature → 可疑
+        # 規則 3: 已知端點對 AD 發起 NTLMSSP → Windows 正常認證
+        if (
+            src_role == "user-endpoint"
+            and dst_role == "domain-controller"
+            and "NTLMSSP" in sig_name
+        ):
+            return TriageVerdict(
+                verdict="normal",
+                confidence="high",
+                reasoning=f"已知 user-endpoint ({src_asset.get('hostname')}) 對 AD 網域控制站進行 NTLMSSP 認證，為正常 Windows 認證流程。",
+                recommended_action="suppress",
+            )
+
+        # 規則 4: 未知外部 IP（不在資產清冊 + 非 RFC1918）→ 高風險異常
+        if not src_known and not self._is_internal(source_ip):
+            return TriageVerdict(
+                verdict="anomalous",
+                confidence="high",
+                reasoning=f"來源 IP {source_ip} 不在資產清冊中且為外部 IP，屬未知外部裝置，建議封鎖。",
+                recommended_action="block",
+                edl_entry=source_ip,
+            )
+
+        # 規則 5: 未知內部 IP（不在資產清冊 + RFC1918）→ 疑似未授權設備
+        if not src_known and self._is_internal(source_ip):
+            return TriageVerdict(
+                verdict="anomalous",
+                confidence="medium",
+                reasoning=f"來源 IP {source_ip} 不在資產清冊中，屬未知內部裝置，可能為未授權設備，需調查。",
+                recommended_action="monitor",
+            )
+
+        # 規則 6: 同一來源短時間觸發多種 signature → 疑似掃描
         other_sig_count = freq.get("same_src_other_sig_24h", 0)
         if isinstance(other_sig_count, int) and other_sig_count > 5:
             return TriageVerdict(
@@ -186,8 +226,14 @@ class LLMClient:
 
     @staticmethod
     def _is_internal(ip: str) -> bool:
-        return (
-            ip.startswith("192.168.")
-            or ip.startswith("10.")
-            or ip.startswith("172.16.")
-        )
+        if not ip or ip == "0.0.0.0":
+            return True
+        if ip.startswith("10.") or ip.startswith("192.168."):
+            return True
+        if ip.startswith("172."):
+            parts = ip.split(".")
+            try:
+                return 16 <= int(parts[1]) <= 31
+            except (IndexError, ValueError):
+                return False
+        return False

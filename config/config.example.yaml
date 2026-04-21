@@ -1,0 +1,80 @@
+# Graylog Threat Analyzer 設定檔
+# 複製此檔為 config.yaml 並填入實際值
+#
+# ★ Graylog Event Definition 建議新增的 Field Extraction（在「Fields」頁籤）
+#   以下是經原始 PAN THREAT 訊息欄位名稱確認後的對應關係：
+#
+#   Event Definition Field Name  │ 原始 Graylog Stream 欄位名稱
+#   ─────────────────────────────┼───────────────────────────────────────────
+#   Severity                     │ vendor_alert_severity     ← 影響 informational 判斷
+#   SignatureName                 │ alert_signature           ← 完整 "Name(ID)" 格式
+#   SourceZone                   │ source_zone
+#   DestinationZone              │ destination_zone
+#   RuleName                     │ rule_name
+#   Protocol                     │ network_transport
+#   Direction                    │ pan_alert_direction
+#
+# ★ JMTE Body Template 對應新增（放在 "fields" 物件內，與現有欄位並列）：
+#   "severity":          "${event.fields.Severity}",
+#   "signature_name":    "${event.fields.SignatureName}",
+#   "source_zone":       "${event.fields.SourceZone}",
+#   "destination_zone":  "${event.fields.DestinationZone}",
+#   "rule_name":         "${event.fields.RuleName}",
+#   "transport":         "${event.fields.Protocol}",
+#   "direction":         "${event.fields.Direction}",
+#
+# 最重要的是 severity 和 signature_name：
+#   severity      → 啟用「informational+alert → normal」判斷規則
+#   signature_name → 讓 triage 和 email 顯示完整 signature 文字，改善 LLM 上下文
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  # Graylog webhook 驗證用 token（選填，建議設定）
+  webhook_token: "your-secret-token-here"
+
+graylog:
+  # Graylog API 位址（用於 enrichment 查詢歷史事件）
+  api_url: "http://YOUR_GRAYLOG_IP:9000/api"
+  api_token: "your-graylog-api-token"
+  # 查詢歷史事件的時間範圍（小時）
+  lookback_hours: 24
+  # Graylog stream 中的欄位名稱（用於 Search API 頻率查詢）
+  # 預設值對應 PAN syslog 經 Graylog pipeline 處理後的欄位名稱
+  field_source_ip: "source_ip"           # 來源 IP 欄位
+  field_destination_ip: "destination_ip" # 目標 IP 欄位
+  field_threat_id: "alert_signature"     # Threat ID / Signature 欄位
+
+llm:
+  # 內部 LLM API endpoint
+  api_url: "http://your-llm-server:8080/v1/chat/completions"
+  model: "your-model-name"
+  temperature: 0.1
+  max_tokens: 500
+  # 請求逾時（秒）
+  timeout: 30
+
+smtp:
+  host: "your-smtp-server"
+  port: 25
+  # 如需認證，填入以下欄位
+  username: ""
+  password: ""
+  use_tls: false
+  sender: "graylog-analyzer@example.com"
+  recipients:
+    - "security-team@example.com"
+
+edl:
+  # EDL 檔案輸出路徑（PA 會透過 HTTP 拉取）
+  output_dir: "/var/www/edl"
+  # 預設 TTL（天），過期自動移除
+  default_ttl_days: 30
+
+assets:
+  # 資產清冊 CSV 路徑
+  csv_path: "config/assets.csv"
+
+known_fp:
+  # 已知誤判清單 CSV 路徑
+  csv_path: "config/known_fp.csv"
