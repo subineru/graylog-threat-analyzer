@@ -65,14 +65,16 @@ class EnrichmentService:
         """對單一事件進行完整 enrichment"""
         source_ip = message.get("source_ip", "")
         destination_ip = message.get("destination_ip", "")
-        signature = message.get("alert_signature", "")
+        threat_id = message.get("threat_id", "") or message.get("alert_signature", "")
+        # signature_name 目前通常為空（JMTE template 尚未加入），fallback 到 threat_id
+        sig_name = message.get("signature_name", "") or f"ThreatID {threat_id}"
 
         # 1. 資產查詢
         source_asset = self.asset_lookup.lookup(source_ip)
         destination_asset = self.asset_lookup.lookup(destination_ip)
 
         # 2. 頻率查詢
-        frequency = await self._query_frequency(source_ip, destination_ip, signature)
+        frequency = await self._query_frequency(source_ip, destination_ip, threat_id)
 
         # 3. 威脅情資（僅外部 IP）
         source_reputation = await self._check_reputation(source_ip)
@@ -80,19 +82,23 @@ class EnrichmentService:
 
         return {
             "event_summary": {
-                "signature_id": self._extract_signature_id(signature),
-                "signature_name": signature,
+                "signature_id": threat_id,
+                "signature_name": sig_name,
                 "severity": message.get("vendor_alert_severity", "unknown"),
                 "action": message.get("vendor_event_action", "unknown"),
                 "source_ip": source_ip,
                 "source_user": message.get("source_user_name", ""),
                 "destination_ip": destination_ip,
                 "destination_user": message.get("destination_user_name", ""),
-                "protocol": f"{message.get('application_name', '')} / {message.get('network_transport', '')}",
+                "protocol": f"{message.get('application_name', '')} / {message.get('network_transport', '')}".strip(" /"),
                 "direction": message.get("pan_alert_direction", ""),
                 "zone_flow": f"{message.get('source_zone', '')} → {message.get('destination_zone', '')}",
                 "rule_name": message.get("rule_name", ""),
                 "rcvss": message.get("RCVSS", ""),
+                "threat_content_type": message.get("threat_content_type", ""),
+                "file_name": message.get("file_name", ""),
+                "destination_port": message.get("destination_port", ""),
+                "firewall": message.get("firewall", ""),
             },
             "asset_context": {
                 "source_asset": source_asset,
@@ -107,7 +113,7 @@ class EnrichmentService:
         }
 
     async def _query_frequency(
-        self, source_ip: str, destination_ip: str, signature: str
+        self, source_ip: str, destination_ip: str, threat_id: str
     ) -> dict:
         """查詢 Graylog API 取得歷史頻率"""
         if not self.graylog_api_url:
@@ -117,24 +123,24 @@ class EnrichmentService:
                 "same_dst_same_sig_24h": -1,
             }
 
-        sig_id = self._extract_signature_id(signature)
+        sig_id = self._extract_signature_id(threat_id)
 
         try:
             async with httpx.AsyncClient(verify=False) as client:
-                # 同 source IP + 同 signature
+                # 同 source IP + 同 signature（wildcard 相容 "Name(ID)" 格式）
                 same_src_same_sig = await self._graylog_count(
                     client,
-                    f'source_ip:"{source_ip}" AND alert_signature:"{sig_id}"',
+                    f'source_ip:"{source_ip}" AND alert_signature:*{sig_id}*',
                 )
-                # 同 source IP + 其他 signature
+                # 同 source IP + 其他 signature（掃描偵測）
                 same_src_other_sig = await self._graylog_count(
                     client,
-                    f'source_ip:"{source_ip}" AND NOT alert_signature:"{sig_id}" AND event_log_name:"THREAT"',
+                    f'source_ip:"{source_ip}" AND NOT alert_signature:*{sig_id}*',
                 )
                 # 同 destination IP + 同 signature
                 same_dst_same_sig = await self._graylog_count(
                     client,
-                    f'destination_ip:"{destination_ip}" AND alert_signature:"{sig_id}"',
+                    f'destination_ip:"{destination_ip}" AND alert_signature:*{sig_id}*',
                 )
 
             return {

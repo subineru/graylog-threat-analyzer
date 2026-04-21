@@ -1,5 +1,15 @@
 # Graylog Threat Analyzer 設定檔
 # 複製此檔為 config.yaml 並填入實際值
+#
+# ★ Graylog Custom HTTP Notification JMTE 模板建議補充欄位（加入 fields 區塊）：
+#   "severity":          "${event.fields.Severity}",        # 影響 informational 判斷規則
+#   "signature_name":    "${event.fields.Signature}",       # 完整 signature 文字名稱
+#   "source_zone":       "${event.fields.FromZone}",
+#   "destination_zone":  "${event.fields.ToZone}",
+#   "rule_name":         "${event.fields.SecurityRule}",
+#   "transport":         "${event.fields.Protocol}",
+#   "direction":         "${event.fields.Direction}",
+#   （欄位名稱視你的 Graylog pipeline rules 而定，請自行確認）
 
 server:
   host: "0.0.0.0"
@@ -13,6 +23,11 @@ graylog:
   api_token: "your-graylog-api-token"
   # 查詢歷史事件的時間範圍（小時）
   lookback_hours: 24
+  # Graylog stream 中的欄位名稱（用於 Search API 頻率查詢）
+  # 預設值對應 PAN syslog 經 Graylog pipeline 處理後的欄位名稱
+  field_source_ip: "source_ip"           # 來源 IP 欄位
+  field_destination_ip: "destination_ip" # 目標 IP 欄位
+  field_threat_id: "alert_signature"     # Threat ID / Signature 欄位
 
 llm:
   # 內部 LLM API endpoint

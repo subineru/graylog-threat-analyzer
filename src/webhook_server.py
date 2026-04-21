@@ -26,13 +26,76 @@ def load_config(path: str = "config/config.yaml") -> dict:
 # --- Pydantic Models ---
 
 class GraylogEvent(BaseModel):
-    """Graylog HTTP Notification 的頂層結構"""
+    """
+    Graylog Custom HTTP Notification 的頂層結構。
+
+    對應 JMTE Body Template 格式：
+      - fields：事件欄位（source_address、action、rcvss 等）
+      - backlog：觸發本事件的原始 messages（選用，內容視 template 而定）
+    """
     model_config = ConfigDict(extra="ignore")
 
     event_definition_id: str | None = None
-    event_definition_title: str | None = None
-    event: dict | None = None
+    event_title: str | None = None          # 對應 template 的 event_title
+    event_id: str | None = None
+    event_timestamp: str | None = None
+    event_priority: int | None = None
+    fields: dict = {}                        # 所有事件欄位都在這裡
     backlog: list[dict] = []
+
+
+def _normalize_event_fields(payload: GraylogEvent) -> dict:
+    """
+    將 Graylog Custom HTTP Notification 的 fields 轉成程式內部通用格式。
+
+    欄位對照（JMTE template → 內部欄位名稱）：
+      source_address       → source_ip
+      destination_address  → destination_ip
+      source_user          → source_user_name
+      destination_user     → destination_user_name
+      action               → vendor_event_action
+      threat_id            → alert_signature  （目前只有 ID，無簽名文字名稱）
+      rcvss                → RCVSS
+
+    ★ 以下欄位目前未在 JMTE template 中，值會為空字串：
+      severity（vendor_alert_severity）— 影響規則 2（informational 判斷）
+      signature_name — 影響 LLM 上下文品質
+      source_zone / destination_zone / rule_name / network_transport
+      建議在 JMTE template 的 fields 區塊加入對應的 ${event.fields.XXX}。
+    """
+    f = payload.fields
+    return {
+        # 識別
+        "event_uid":            payload.event_id or "",
+        "event_timestamp":      payload.event_timestamp or "",
+        # 威脅
+        "alert_signature":      f.get("threat_id", ""),
+        "threat_id":            f.get("threat_id", ""),
+        "signature_name":       f.get("signature_name", ""),   # 建議加入 JMTE
+        "threat_content_type":  f.get("threat_content_type", ""),
+        "file_name":            f.get("file_name", ""),
+        # 行動 / 嚴重性
+        "vendor_event_action":  f.get("action", ""),
+        "vendor_alert_severity": f.get("severity", ""),        # 建議加入 JMTE
+        "RCVSS":                f.get("rcvss", ""),
+        # 來源
+        "source_ip":            f.get("source_address", ""),
+        "source_user_name":     f.get("source_user", ""),
+        "source_location":      f.get("source_location", ""),
+        # 目標
+        "destination_ip":       f.get("destination_address", ""),
+        "destination_user_name": f.get("destination_user", ""),
+        "destination_port":     f.get("destination_port", ""),
+        # 網路環境
+        "application_name":     f.get("application", ""),
+        "network_transport":    f.get("transport", ""),        # 建議加入 JMTE
+        "pan_alert_direction":  f.get("direction", ""),        # 建議加入 JMTE
+        "source_zone":          f.get("source_zone", ""),      # 建議加入 JMTE
+        "destination_zone":     f.get("destination_zone", ""), # 建議加入 JMTE
+        "rule_name":            f.get("rule_name", ""),        # 建議加入 JMTE
+        # 防火牆
+        "firewall":             f.get("firewall", ""),
+    }
 
 
 # --- Application ---
@@ -66,14 +129,14 @@ async def receive_graylog_webhook(
     x_webhook_token: str | None = Header(default=None),
 ):
     """
-    接收 Graylog webhook 推送的 THREAT 事件。
+    接收 Graylog Custom HTTP Notification。
 
     處理流程：
     1. 驗證 webhook token
-    2. 從 backlog 取出原始 log fields
-    3. Context enrichment
-    4. LLM 研判（Phase 2 啟用，Phase 1 用固定規則）
-    5. 依據 verdict 採取行動
+    2. 從 payload.fields 取出正規化後的事件欄位
+    3. Context enrichment（資產查詢、頻率分析、威脅情資）
+    4. LLM 研判（Phase 1: 固定規則 / Phase 2: LLM）
+    5. 依據 verdict 採取行動（email / EDL pending）
     """
     config = request.app.state.config
 
@@ -82,43 +145,41 @@ async def receive_graylog_webhook(
     if expected_token and x_webhook_token != expected_token:
         raise HTTPException(status_code=403, detail="Invalid webhook token")
 
-    # 2. 解析 backlog
-    if not payload.backlog:
-        logger.warning("Received webhook with empty backlog, skipping.")
-        return {"status": "skipped", "reason": "empty backlog"}
+    # 2. 確認 fields 不為空（Test Notification 時 fields 全為空值屬正常）
+    if not payload.fields:
+        logger.warning("Received webhook with empty fields, skipping.")
+        return {"status": "skipped", "reason": "empty fields"}
 
-    results = []
-    for message in payload.backlog:
-        try:
-            result = await process_single_event(request, message)
-            results.append(result)
-        except Exception as e:
-            logger.error(f"Error processing event: {e}", exc_info=True)
-            results.append({"status": "error", "error": str(e)})
+    try:
+        result = await process_single_event(request, payload)
+    except Exception as e:
+        logger.error(f"Error processing event: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
 
-    return {"status": "processed", "results": results}
+    return {"status": "processed", "result": result}
 
 
-async def process_single_event(request: Request, message: dict) -> dict:
+async def process_single_event(request: Request, payload: GraylogEvent) -> dict:
     """處理單一 THREAT 事件"""
     enrichment_svc = request.app.state.enrichment
     llm_client = request.app.state.llm
     notifier = request.app.state.notifier
     edl_mgr = request.app.state.edl
 
+    # 將 Graylog payload 正規化為內部格式
+    message = _normalize_event_fields(payload)
+
     # 3. Context enrichment
     enriched = await enrichment_svc.enrich(message)
 
-    # 4. 研判
-    # Phase 1: 固定規則（先上線驗證流程）
-    # Phase 2: 改用 LLM
+    # 4. 研判（Phase 1: 固定規則 / Phase 2: LLM）
     verdict = await llm_client.triage(enriched)
 
     # 5. 行動路由
-    sig_name = message.get("alert_signature", "unknown")
+    sig = message.get("alert_signature") or message.get("signature_name") or "unknown"
     src_ip = message.get("source_ip", "unknown")
     dst_ip = message.get("destination_ip", "unknown")
-    event_summary = f"[{verdict.verdict.upper()}] {sig_name} | {src_ip} → {dst_ip}"
+    event_summary = f"[{verdict.verdict.upper()}] ThreatID={sig} | {src_ip} → {dst_ip}"
 
     if verdict.verdict == "anomalous" and verdict.confidence == "high":
         edl_approve_url = None
@@ -128,7 +189,7 @@ async def process_single_event(request: Request, message: dict) -> dict:
             edl_approve_url = f"{base_url}/edl/approve/{token}"
 
         await notifier.send_alert(
-            subject=f"🔴 High Confidence Anomaly: {sig_name}",
+            subject=f"🔴 High Confidence Anomaly: ThreatID={sig}",
             enriched_context=enriched,
             verdict=verdict,
             edl_approve_url=edl_approve_url,
@@ -136,7 +197,7 @@ async def process_single_event(request: Request, message: dict) -> dict:
 
     elif verdict.verdict == "anomalous":
         await notifier.send_alert(
-            subject=f"🟡 Anomaly (needs review): {sig_name}",
+            subject=f"🟡 Anomaly (needs review): ThreatID={sig}",
             enriched_context=enriched,
             verdict=verdict,
         )
@@ -157,9 +218,7 @@ async def process_single_event(request: Request, message: dict) -> dict:
 
 @app.get("/edl/approve/{token}")
 async def edl_approve(token: str, request: Request):
-    """
-    點擊 email 中的確認連結後呼叫此 endpoint，將 pending EDL 條目正式寫入。
-    """
+    """點擊 email 中的確認連結後呼叫此 endpoint，將 pending EDL 條目正式寫入。"""
     edl_mgr = request.app.state.edl
     success, message = edl_mgr.approve_entry(token)
     if success:
