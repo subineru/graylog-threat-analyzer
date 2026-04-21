@@ -131,6 +131,7 @@ app = FastAPI(
 
 
 @app.post("/webhook/graylog")
+@app.post("/webhook")           # Graylog URL 設定為 /webhook 時的別名
 async def receive_graylog_webhook(
     request: Request,
     payload: GraylogEvent,

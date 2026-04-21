@@ -31,6 +31,7 @@ class LLMClient:
         self.temperature = llm_cfg.get("temperature", 0.1)
         self.max_tokens = llm_cfg.get("max_tokens", 500)
         self.timeout = llm_cfg.get("timeout", 30)
+        self.api_key = llm_cfg.get("api_key", "")
         self.use_llm = bool(self.api_url and self.model)
 
         # 載入 prompt template
@@ -145,9 +146,13 @@ class LLMClient:
         prompt = self._build_prompt(enriched)
 
         try:
+            headers = {}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     self.api_url,
+                    headers=headers,
                     json={
                         "model": self.model,
                         "messages": [
