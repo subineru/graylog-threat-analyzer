@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 import yaml
 from fastapi import FastAPI, Header, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .enrichment import EnrichmentService
 from .llm_client import LLMClient
@@ -27,18 +27,12 @@ def load_config(path: str = "config/config.yaml") -> dict:
 
 class GraylogEvent(BaseModel):
     """Graylog HTTP Notification 的頂層結構"""
+    model_config = ConfigDict(extra="ignore")
+
     event_definition_id: str | None = None
     event_definition_title: str | None = None
     event: dict | None = None
     backlog: list[dict] = []
-
-
-class TriageVerdict(BaseModel):
-    verdict: str  # normal | false_positive | anomalous
-    confidence: str  # high | medium | low
-    reasoning: str
-    recommended_action: str  # suppress | monitor | block
-    edl_entry: str | None = None
 
 
 # --- Application ---
@@ -159,3 +153,13 @@ async def process_single_event(request: Request, message: dict) -> dict:
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    import uvicorn
+
+    uvicorn.run("src.webhook_server:app", host="0.0.0.0", port=8000, reload=True)

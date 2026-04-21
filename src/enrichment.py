@@ -29,14 +29,16 @@ class AssetLookup:
             logger.warning(f"Asset CSV not found: {csv_path}")
             return
         with open(path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                self._assets[row["ip"]] = {
-                    "hostname": row.get("hostname", "unknown"),
-                    "role": row.get("role", "unknown"),
-                    "department": row.get("department", "unknown"),
-                    "note": row.get("note", ""),
-                }
+            # Skip comment lines before passing to DictReader
+            lines = [line for line in f if not line.startswith("#")]
+        reader = csv.DictReader(lines)
+        for row in reader:
+            self._assets[row["ip"]] = {
+                "hostname": row.get("hostname", "unknown"),
+                "role": row.get("role", "unknown"),
+                "department": row.get("department", "unknown"),
+                "note": row.get("note", ""),
+            }
         logger.info(f"Loaded {len(self._assets)} assets from {csv_path}")
 
     def lookup(self, ip: str) -> dict:
@@ -174,13 +176,18 @@ class EnrichmentService:
 
     @staticmethod
     def _is_internal(ip: str) -> bool:
-        """簡易判斷是否為內部 IP"""
-        return (
-            ip.startswith("192.168.")
-            or ip.startswith("10.")
-            or ip.startswith("172.16.")
-            or ip == "0.0.0.0"
-        )
+        """判斷是否為 RFC1918 內部 IP 或保留地址"""
+        if not ip or ip == "0.0.0.0":
+            return True
+        if ip.startswith("10.") or ip.startswith("192.168."):
+            return True
+        if ip.startswith("172."):
+            parts = ip.split(".")
+            try:
+                return 16 <= int(parts[1]) <= 31
+            except (IndexError, ValueError):
+                return False
+        return False
 
     @staticmethod
     def _extract_signature_id(signature: str) -> str:

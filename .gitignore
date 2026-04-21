@@ -1,0 +1,42 @@
+# Actual config with real credentials — never commit this
+config/config.yaml
+
+# EDL output files (generated at runtime)
+/var/www/edl/
+edl_metadata.json
+block_ip.txt
+block_url.txt
+block_domain.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log

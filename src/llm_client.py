@@ -186,8 +186,14 @@ class LLMClient:
 
     @staticmethod
     def _is_internal(ip: str) -> bool:
-        return (
-            ip.startswith("192.168.")
-            or ip.startswith("10.")
-            or ip.startswith("172.16.")
-        )
+        if not ip or ip == "0.0.0.0":
+            return True
+        if ip.startswith("10.") or ip.startswith("192.168."):
+            return True
+        if ip.startswith("172."):
+            parts = ip.split(".")
+            try:
+                return 16 <= int(parts[1]) <= 31
+            except (IndexError, ValueError):
+                return False
+        return False
