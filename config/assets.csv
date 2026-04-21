@@ -1,0 +1,16 @@
+# 資產清冊 — 請填入實際的 IP / 主機名 / 角色
+# 此檔為範例，請依環境修改後使用
+# role 建議值: domain-controller, file-server, web-server, mail-server,
+#              ftp-server, proxy-server, svn-server, vpn-gateway,
+#              application-server, mail-gateway, sharepoint, user-endpoint
+ip,hostname,role,department,note
+10.0.1.10,dc01,domain-controller,IT,AD
+10.0.1.11,dc02,domain-controller,IT,AD
+10.0.1.20,web01,web-server,IT,
+10.0.1.21,fs01,file-server,IT,
+10.0.1.30,mail01,mail-server,IT,Exchange
+10.0.1.31,proxy01,proxy-server,IT,
+10.0.1.40,svn01,svn-server,IT,SVN
+10.0.1.50,app01,application-server,ENG,YMS
+10.0.2.10,vpn01,vpn-gateway,IT,GlobalProtect
+10.0.3.10,branchfs01,file-server,IT,Branch office
