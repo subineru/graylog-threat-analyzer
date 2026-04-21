@@ -40,3 +40,6 @@ htmlcov/
 
 # Logs
 *.log
+
+# Generated preview files
+email_preview.html
