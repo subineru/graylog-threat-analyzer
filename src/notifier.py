@@ -24,13 +24,19 @@ class EmailNotifier:
         self.sender = smtp_cfg.get("sender", "graylog-analyzer@localhost")
         self.recipients = smtp_cfg.get("recipients", [])
 
-    async def send_alert(self, subject: str, enriched_context: dict, verdict) -> bool:
+    async def send_alert(
+        self,
+        subject: str,
+        enriched_context: dict,
+        verdict,
+        edl_approve_url: str | None = None,
+    ) -> bool:
         """寄送告警 email"""
         if not self.recipients:
             logger.warning("No email recipients configured, skipping notification.")
             return False
 
-        body = self._format_email_body(enriched_context, verdict)
+        body = self._format_email_body(enriched_context, verdict, edl_approve_url)
 
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -53,7 +59,9 @@ class EmailNotifier:
             logger.error(f"Failed to send email: {e}", exc_info=True)
             return False
 
-    def _format_email_body(self, enriched: dict, verdict) -> str:
+    def _format_email_body(
+        self, enriched: dict, verdict, edl_approve_url: str | None = None
+    ) -> str:
         """產生 HTML email 內容"""
         summary = enriched.get("event_summary", {})
         asset = enriched.get("asset_context", {})
@@ -66,6 +74,23 @@ class EmailNotifier:
             "false_positive": "#f39c12",
             "normal": "#27ae60",
         }.get(verdict.verdict, "#95a5a6")
+
+        # EDL 封鎖建議區塊
+        if verdict.edl_entry and edl_approve_url:
+            edl_section = f"""
+                <div style="margin: 16px 0; padding: 14px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px;">
+                    <p style="margin: 0 0 8px 0;"><strong>建議封鎖：</strong> <code style="background:#f8f9fa; padding:2px 6px; border-radius:3px;">{verdict.edl_entry}</code></p>
+                    <a href="{edl_approve_url}"
+                       style="display:inline-block; padding:8px 18px; background:#dc3545; color:white; text-decoration:none; border-radius:4px; font-weight:bold;">
+                        &#10003; 確認加入 EDL 封鎖清單
+                    </a>
+                    <p style="margin: 8px 0 0 0; color: #856404; font-size: 12px;">點擊上方按鈕後將立即寫入 EDL。此操作不可撤銷，請確認後再按。</p>
+                </div>"""
+        elif verdict.edl_entry:
+            edl_section = f"""
+                <p><strong>建議阻擋：</strong> <code>{verdict.edl_entry}</code>（尚待確認）</p>"""
+        else:
+            edl_section = ""
 
         return f"""
         <html>
@@ -81,7 +106,7 @@ class EmailNotifier:
                     {verdict.reasoning}
                 </p>
 
-                {f'<p><strong>建議阻擋:</strong> <code>{verdict.edl_entry}</code></p>' if verdict.edl_entry else ''}
+                {edl_section}
 
                 <h3>事件摘要</h3>
                 <table style="width: 100%; border-collapse: collapse; font-size: 14px;">

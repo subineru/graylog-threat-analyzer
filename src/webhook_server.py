@@ -121,13 +121,18 @@ async def process_single_event(request: Request, message: dict) -> dict:
     event_summary = f"[{verdict.verdict.upper()}] {sig_name} | {src_ip} → {dst_ip}"
 
     if verdict.verdict == "anomalous" and verdict.confidence == "high":
+        edl_approve_url = None
+        if verdict.edl_entry:
+            token = edl_mgr.suggest_entry(verdict.edl_entry, source_event=message)
+            base_url = str(request.base_url).rstrip("/")
+            edl_approve_url = f"{base_url}/edl/approve/{token}"
+
         await notifier.send_alert(
             subject=f"🔴 High Confidence Anomaly: {sig_name}",
             enriched_context=enriched,
             verdict=verdict,
+            edl_approve_url=edl_approve_url,
         )
-        if verdict.edl_entry:
-            edl_mgr.suggest_entry(verdict.edl_entry, source_event=message)
 
     elif verdict.verdict == "anomalous":
         await notifier.send_alert(
@@ -148,6 +153,35 @@ async def process_single_event(request: Request, message: dict) -> dict:
         "verdict": verdict.model_dump(),
         "summary": event_summary,
     }
+
+
+@app.get("/edl/approve/{token}")
+async def edl_approve(token: str, request: Request):
+    """
+    點擊 email 中的確認連結後呼叫此 endpoint，將 pending EDL 條目正式寫入。
+    """
+    edl_mgr = request.app.state.edl
+    success, message = edl_mgr.approve_entry(token)
+    if success:
+        return {"status": "approved", "message": message}
+    raise HTTPException(status_code=400, detail=message)
+
+
+@app.get("/edl/reject/{token}")
+async def edl_reject(token: str, request: Request):
+    """拒絕 pending EDL 條目（不寫入 EDL）。"""
+    edl_mgr = request.app.state.edl
+    success, message = edl_mgr.reject_entry(token)
+    if success:
+        return {"status": "rejected", "message": message}
+    raise HTTPException(status_code=400, detail=message)
+
+
+@app.get("/edl/pending")
+async def edl_list_pending(request: Request):
+    """列出所有待審的 EDL 條目（管理用）。"""
+    edl_mgr = request.app.state.edl
+    return {"pending": edl_mgr.list_pending()}
 
 
 @app.get("/health")
