@@ -53,6 +53,7 @@ class EmailNotifier:
                 password=self.password or None,
                 use_tls=self.use_tls,
                 start_tls=False,
+                recipients=self.recipients,
             )
             logger.info(f"Alert email sent: {subject}")
             return True
