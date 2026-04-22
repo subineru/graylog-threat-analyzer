@@ -52,11 +52,11 @@ class TestEnrichment:
     """測試 enrichment 模組的輔助函式"""
 
     def test_extract_signature_id(self):
-        from src.enrichment import EnrichmentService
+        from src.graylog_client import GraylogClient
 
-        assert EnrichmentService._extract_signature_id("Microsoft Windows NTLMSSP Detection(92322)") == "92322"
-        assert EnrichmentService._extract_signature_id("Apache Log4j Remote Code Execution Vulnerability(92001)") == "92001"
-        assert EnrichmentService._extract_signature_id("unknown-format") == "unknown-format"
+        assert GraylogClient._extract_signature_id("Microsoft Windows NTLMSSP Detection(92322)") == "92322"
+        assert GraylogClient._extract_signature_id("Apache Log4j Remote Code Execution Vulnerability(92001)") == "92001"
+        assert GraylogClient._extract_signature_id("unknown-format") == "unknown-format"
 
     def test_is_internal(self):
         from src.enrichment import EnrichmentService

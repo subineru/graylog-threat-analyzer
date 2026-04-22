@@ -7,6 +7,7 @@ Phase 1 使用固定規則（不呼叫 LLM），Phase 2 切換到 LLM 研判。
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import httpx
@@ -168,12 +169,25 @@ class LLMClient:
                 data = resp.json()
 
             # 解析 LLM 回應
-            content = data["choices"][0]["message"]["content"]
-            # 清理可能的 markdown code block
+            message = data["choices"][0]["message"]
+            content = message.get("content") or ""
+
+            # Fallback: 若 content 為空（chain-of-thought 模型可能只有 reasoning），
+            # 嘗試從 reasoning 欄位中萃取 JSON block
+            if not content:
+                reasoning = message.get("reasoning") or ""
+                m = re.search(r'\{[^{}]*"verdict"[^{}]*\}', reasoning, re.DOTALL)
+                content = m.group(0) if m else ""
+
+            # 清理前後空白與 markdown code fence
             content = content.strip()
             if content.startswith("```"):
-                content = content.split("\n", 1)[1]
-                content = content.rsplit("```", 1)[0]
+                parts = content.split("\n", 1)
+                content = parts[1] if len(parts) > 1 else ""
+                content = content.rsplit("```", 1)[0].strip()
+
+            if not content:
+                raise ValueError("LLM returned empty content after parsing")
 
             parsed = json.loads(content)
             return TriageVerdict(**parsed)
