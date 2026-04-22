@@ -76,6 +76,7 @@ class GraylogClient:
                     "limit": 1,
                     "fields": "timestamp",
                 },
+                headers={"Accept": "application/json"},
                 auth=(self.api_token, "token"),
                 timeout=10,
             )

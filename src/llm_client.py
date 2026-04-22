@@ -13,6 +13,8 @@ from pathlib import Path
 import httpx
 from pydantic import BaseModel
 
+from .known_fp import KnownFPChecker
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,6 +37,10 @@ class LLMClient:
         self.api_key = llm_cfg.get("api_key", "")
         self.use_llm = bool(self.api_url and self.model)
 
+        # 載入 known_fp 規則
+        fp_csv = config.get("known_fp", {}).get("csv_path", "config/known_fp.csv")
+        self.known_fp = KnownFPChecker(fp_csv)
+
         # 載入 prompt template
         prompt_path = Path("prompts/triage.md")
         if prompt_path.exists():
@@ -46,9 +52,20 @@ class LLMClient:
     async def triage(self, enriched: dict) -> TriageVerdict:
         """
         研判單一事件。
+        Step 0: known_fp 快速過濾。
         Phase 1: 使用固定規則。
         Phase 2: 呼叫 LLM。
         """
+        summary = enriched.get("event_summary", {})
+        fp_note = self.known_fp.check(summary)
+        if fp_note:
+            return TriageVerdict(
+                verdict="false_positive",
+                confidence="high",
+                reasoning=f"符合 known_fp 規則：{fp_note}",
+                recommended_action="suppress",
+            )
+
         if not self.use_llm:
             return self._rule_based_triage(enriched)
 

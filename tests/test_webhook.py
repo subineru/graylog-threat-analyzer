@@ -264,3 +264,81 @@ class TestEDLApproval:
         assert success is True
         assert len(mgr.list_pending()) == 0
         assert len(mgr.list_entries()) == 0  # 拒絕後不寫入 EDL
+
+
+class TestKnownFP:
+    """測試 known_fp.csv 快速過濾邏輯"""
+
+    CSV_CONTENT = (
+        "signature_id,signature_name,action,source_ip,destination_ip,rcvss,note\n"
+        '92322,Microsoft Windows NTLMSSP Detection,alert,,"192.168.2.7,192.168.2.8",None,AD 正常 NTLM 認證\n'
+    )
+
+    def _make_checker(self, tmp_path):
+        from src.known_fp import KnownFPChecker
+        csv_file = tmp_path / "known_fp.csv"
+        csv_file.write_text(self.CSV_CONTENT, encoding="utf-8")
+        return KnownFPChecker(str(csv_file))
+
+    def test_ntlmssp_to_ad_ip_matches(self, tmp_path):
+        checker = self._make_checker(tmp_path)
+        result = checker.check({
+            "signature_id": "92322",
+            "action": "alert",
+            "source_ip": "10.0.5.48",
+            "destination_ip": "192.168.2.7",
+        })
+        assert result == "AD 正常 NTLM 認證"
+
+    def test_same_sig_unknown_dst_no_match(self, tmp_path):
+        checker = self._make_checker(tmp_path)
+        result = checker.check({
+            "signature_id": "92322",
+            "action": "alert",
+            "source_ip": "10.0.5.48",
+            "destination_ip": "10.0.99.99",   # 不在清單內
+        })
+        assert result is None
+
+    def test_different_sig_no_match(self, tmp_path):
+        checker = self._make_checker(tmp_path)
+        result = checker.check({
+            "signature_id": "12345",
+            "action": "alert",
+            "source_ip": "10.0.5.48",
+            "destination_ip": "192.168.2.7",
+        })
+        assert result is None
+
+    def test_full_signature_name_extracted(self, tmp_path):
+        checker = self._make_checker(tmp_path)
+        # 傳入完整格式 "Name(ID)"，_extract_id 應能正確取出 92322
+        result = checker.check({
+            "signature_id": "",
+            "signature_name": "Microsoft Windows NTLMSSP Detection(92322)",
+            "action": "alert",
+            "source_ip": "10.0.5.48",
+            "destination_ip": "192.168.2.8",
+        })
+        assert result == "AD 正常 NTLM 認證"
+
+    def test_triage_returns_false_positive(self, tmp_path):
+        from src.llm_client import LLMClient
+        import asyncio
+
+        csv_file = tmp_path / "known_fp.csv"
+        csv_file.write_text(self.CSV_CONTENT, encoding="utf-8")
+        client = LLMClient({"llm": {}, "known_fp": {"csv_path": str(csv_file)}})
+        enriched = {
+            "event_summary": {
+                "signature_id": "92322",
+                "signature_name": "Microsoft Windows NTLMSSP Detection(92322)",
+                "action": "alert",
+                "source_ip": "10.0.5.48",
+                "destination_ip": "192.168.2.7",
+            }
+        }
+        verdict = asyncio.run(client.triage(enriched))
+        assert verdict.verdict == "false_positive"
+        assert verdict.confidence == "high"
+        assert verdict.recommended_action == "suppress"
