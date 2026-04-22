@@ -3,9 +3,11 @@ Known False Positive Checker
 
 從 known_fp.csv 載入已知誤判規則，在 triage 前快速過濾。
 CSV 欄位：signature_id, signature_name, action, source_ip, destination_ip, rcvss, note
+source_ip / destination_ip 支援單一 IP、逗號分隔多值、或 CIDR 網段（如 192.168.2.0/24）
 """
 
 import csv
+import ipaddress
 import logging
 from pathlib import Path
 
@@ -27,22 +29,40 @@ class KnownFPChecker:
         reader = csv.DictReader(lines)
         for row in reader:
             actions = {a.strip() for a in row.get("action", "").split(",") if a.strip()}
-            source_ips = {ip.strip() for ip in row.get("source_ip", "").split(",") if ip.strip()}
-            dst_raw = row.get("destination_ip", "").strip()
-            if dst_raw.lower() in ("", "any"):
-                destination_ips: set[str] = set()
-            else:
-                destination_ips = {ip.strip() for ip in dst_raw.split(",") if ip.strip()}
-
             self._rules.append({
-                "signature_id":   row.get("signature_id", "").strip(),
-                "signature_name": row.get("signature_name", "").strip(),
-                "actions":        actions,
-                "source_ips":     source_ips,
-                "destination_ips": destination_ips,
-                "note":           row.get("note", "").strip(),
+                "signature_id":        row.get("signature_id", "").strip(),
+                "signature_name":      row.get("signature_name", "").strip(),
+                "actions":             actions,
+                "source_networks":     self._parse_networks(row.get("source_ip", "")),
+                "destination_networks": self._parse_networks(row.get("destination_ip", "")),
+                "note":                row.get("note", "").strip(),
             })
         logger.info(f"Loaded {len(self._rules)} known_fp rules from {csv_path}")
+
+    @staticmethod
+    def _parse_networks(raw: str) -> list:
+        """將逗號分隔的 IP / CIDR 解析為 ip_network 清單；空白或 any = 萬用（空清單）。"""
+        networks = []
+        for item in raw.split(","):
+            item = item.strip()
+            if not item or item.lower() == "any":
+                continue
+            try:
+                networks.append(ipaddress.ip_network(item, strict=False))
+            except ValueError:
+                logger.warning(f"known_fp: invalid IP/CIDR '{item}', skipping")
+        return networks
+
+    @staticmethod
+    def _ip_in_networks(ip_str: str, networks: list) -> bool:
+        """networks 為空（萬用）→ True；否則檢查 ip_str 是否落在任一 network 內。"""
+        if not networks:
+            return True
+        try:
+            addr = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False
+        return any(addr in net for net in networks)
 
     def check(self, summary: dict) -> str | None:
         """
@@ -61,9 +81,9 @@ class KnownFPChecker:
                 continue
             if rule["actions"] and action not in rule["actions"]:
                 continue
-            if rule["source_ips"] and src_ip not in rule["source_ips"]:
+            if not self._ip_in_networks(src_ip, rule["source_networks"]):
                 continue
-            if rule["destination_ips"] and dst_ip not in rule["destination_ips"]:
+            if not self._ip_in_networks(dst_ip, rule["destination_networks"]):
                 continue
             note = rule["note"] or rule["signature_name"]
             logger.debug(f"known_fp match: sig={sig_id} src={src_ip} dst={dst_ip} → {note}")

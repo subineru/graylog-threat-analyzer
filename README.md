@@ -218,11 +218,17 @@ Header：`X-Webhook-Token: <webhook_token>`
 
 ```csv
 # signature_id,signature_name,action,source_ip,destination_ip,rcvss,note
+# 精確 IP（多個以逗號分隔，需引號包覆整個欄位）
 92322,Microsoft Windows NTLMSSP Detection,alert,,"192.168.2.7,192.168.2.8",None,AD 正常 NTLM 認證
+# CIDR 網段
+92322,Microsoft Windows NTLMSSP Detection,alert,,192.168.2.0/24,None,AD 伺服器網段
+# 混用：精確 IP + CIDR
+92322,Microsoft Windows NTLMSSP Detection,alert,,"10.0.1.5,192.168.2.0/24",None,AD 混合規則
 ```
 
 - `source_ip` / `destination_ip` 留空 = 比對任意 IP
-- 多個 IP 用逗號分隔，需以引號包覆整個欄位
+- 支援 **CIDR 網段**（如 `192.168.2.0/24`），精確 IP 與 CIDR 可混用
+- 多個值用逗號分隔，需以引號包覆整個欄位
 - `action` 留空 = 比對任意 action；多個 action 用逗號分隔
 
 ---
@@ -233,7 +239,7 @@ Header：`X-Webhook-Token: <webhook_token>`
 pytest tests/ -v
 ```
 
-目前涵蓋 20 個測試案例：enrichment 工具函式、EDL 生命週期、固定規則研判、known_fp 過濾、EDL pending 審核流程。
+目前涵蓋 24 個測試案例：enrichment 工具函式、EDL 生命週期、固定規則研判、known_fp 過濾（含 CIDR 網段）、EDL pending 審核流程。
 
 ---
 

@@ -342,3 +342,69 @@ class TestKnownFP:
         assert verdict.verdict == "false_positive"
         assert verdict.confidence == "high"
         assert verdict.recommended_action == "suppress"
+
+
+class TestKnownFPCIDR:
+    """測試 known_fp.csv CIDR 網段比對"""
+
+    CSV_CIDR = (
+        "signature_id,signature_name,action,source_ip,destination_ip,rcvss,note\n"
+        "92322,Microsoft Windows NTLMSSP Detection,alert,,192.168.2.0/24,None,AD 伺服器網段\n"
+    )
+
+    def _make_checker(self, tmp_path):
+        from src.known_fp import KnownFPChecker
+        csv_file = tmp_path / "known_fp_cidr.csv"
+        csv_file.write_text(self.CSV_CIDR, encoding="utf-8")
+        return KnownFPChecker(str(csv_file))
+
+    def test_ip_in_cidr_matches(self, tmp_path):
+        checker = self._make_checker(tmp_path)
+        result = checker.check({
+            "signature_id": "92322",
+            "action": "alert",
+            "source_ip": "10.0.5.48",
+            "destination_ip": "192.168.2.100",  # 在 /24 內
+        })
+        assert result == "AD 伺服器網段"
+
+    def test_ip_out_of_cidr_no_match(self, tmp_path):
+        checker = self._make_checker(tmp_path)
+        result = checker.check({
+            "signature_id": "92322",
+            "action": "alert",
+            "source_ip": "10.0.5.48",
+            "destination_ip": "192.168.3.1",  # 不在 /24 內
+        })
+        assert result is None
+
+    def test_cidr_boundary_last_host_matches(self, tmp_path):
+        checker = self._make_checker(tmp_path)
+        result = checker.check({
+            "signature_id": "92322",
+            "action": "alert",
+            "source_ip": "10.0.5.48",
+            "destination_ip": "192.168.2.255",  # /24 最後一個位址
+        })
+        assert result == "AD 伺服器網段"
+
+    def test_mixed_ip_and_cidr(self, tmp_path):
+        """同一規則混用單一 IP 與 CIDR"""
+        from src.known_fp import KnownFPChecker
+        csv_content = (
+            "signature_id,signature_name,action,source_ip,destination_ip,rcvss,note\n"
+            '"92322","Microsoft Windows NTLMSSP Detection","alert",,"10.0.1.5,192.168.2.0/24","None","混合規則"\n'
+        )
+        csv_file = tmp_path / "known_fp_mixed.csv"
+        csv_file.write_text(csv_content, encoding="utf-8")
+        checker = KnownFPChecker(str(csv_file))
+
+        # 精確 IP 命中
+        assert checker.check({"signature_id": "92322", "action": "alert",
+                               "source_ip": "", "destination_ip": "10.0.1.5"}) == "混合規則"
+        # CIDR 命中
+        assert checker.check({"signature_id": "92322", "action": "alert",
+                               "source_ip": "", "destination_ip": "192.168.2.200"}) == "混合規則"
+        # 兩者皆不符
+        assert checker.check({"signature_id": "92322", "action": "alert",
+                               "source_ip": "", "destination_ip": "10.0.2.1"}) is None
