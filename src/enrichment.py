@@ -11,7 +11,7 @@ import csv
 import logging
 from pathlib import Path
 
-import httpx
+from .graylog_client import GraylogClient
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +55,7 @@ class EnrichmentService:
         self.config = config
         asset_csv = config.get("assets", {}).get("csv_path", "config/assets.csv")
         self.asset_lookup = AssetLookup(asset_csv)
-
-        graylog_cfg = config.get("graylog", {})
-        self.graylog_api_url = graylog_cfg.get("api_url", "")
-        self.graylog_api_token = graylog_cfg.get("api_token", "")
-        self.lookback_hours = graylog_cfg.get("lookback_hours", 24)
+        self.graylog = GraylogClient(config)
 
     async def enrich(self, message: dict) -> dict:
         """對單一事件進行完整 enrichment"""
@@ -74,7 +70,7 @@ class EnrichmentService:
         destination_asset = self.asset_lookup.lookup(destination_ip)
 
         # 2. 頻率查詢
-        frequency = await self._query_frequency(source_ip, destination_ip, threat_id)
+        frequency = await self.graylog.query_frequency(source_ip, destination_ip, threat_id)
 
         # 3. 威脅情資（僅外部 IP）
         source_reputation = await self._check_reputation(source_ip)
@@ -112,70 +108,6 @@ class EnrichmentService:
             "raw_message": message,
         }
 
-    async def _query_frequency(
-        self, source_ip: str, destination_ip: str, threat_id: str
-    ) -> dict:
-        """查詢 Graylog API 取得歷史頻率"""
-        if not self.graylog_api_url:
-            return {
-                "same_src_same_sig_24h": -1,
-                "same_src_other_sig_24h": -1,
-                "same_dst_same_sig_24h": -1,
-            }
-
-        sig_id = self._extract_signature_id(threat_id)
-
-        # 若 threat_id 已是完整格式 "Name(ID)"（JMTE 加入 signature_name 後），
-        # 用完整字串做精確比對；否則用 wildcard 比對 ID 數字
-        if "(" in threat_id:
-            sig_query = f'alert_signature:"{threat_id}"'
-        else:
-            sig_query = f'alert_signature:*{sig_id}*'
-
-        try:
-            async with httpx.AsyncClient(verify=False) as client:
-                same_src_same_sig = await self._graylog_count(
-                    client,
-                    f'source_ip:"{source_ip}" AND {sig_query}',
-                )
-                same_src_other_sig = await self._graylog_count(
-                    client,
-                    f'source_ip:"{source_ip}" AND NOT {sig_query}',
-                )
-                same_dst_same_sig = await self._graylog_count(
-                    client,
-                    f'destination_ip:"{destination_ip}" AND {sig_query}',
-                )
-
-            return {
-                "same_src_same_sig_24h": same_src_same_sig,
-                "same_src_other_sig_24h": same_src_other_sig,
-                "same_dst_same_sig_24h": same_dst_same_sig,
-            }
-        except Exception as e:
-            logger.error(f"Graylog frequency query failed: {e}")
-            return {
-                "same_src_same_sig_24h": -1,
-                "same_src_other_sig_24h": -1,
-                "same_dst_same_sig_24h": -1,
-            }
-
-    async def _graylog_count(self, client: httpx.AsyncClient, query: str) -> int:
-        """呼叫 Graylog Search API 計算事件數量"""
-        resp = await client.get(
-            f"{self.graylog_api_url}/search/universal/relative",
-            params={
-                "query": query,
-                "range": self.lookback_hours * 3600,
-                "limit": 0,
-                "fields": "timestamp",
-            },
-            auth=(self.graylog_api_token, "token"),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return resp.json().get("total_results", 0)
-
     async def _check_reputation(self, ip: str) -> str:
         """查詢外部威脅情資（僅限非 RFC1918 IP）"""
         if self._is_internal(ip):
@@ -198,10 +130,3 @@ class EnrichmentService:
             except (IndexError, ValueError):
                 return False
         return False
-
-    @staticmethod
-    def _extract_signature_id(signature: str) -> str:
-        """從 'Microsoft Windows NTLMSSP Detection(92322)' 提取 '92322'"""
-        if "(" in signature and signature.endswith(")"):
-            return signature.rsplit("(", 1)[-1].rstrip(")")
-        return signature
