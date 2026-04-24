@@ -79,3 +79,9 @@ assets:
 known_fp:
   # 已知誤判清單 CSV 路徑
   csv_path: "config/known_fp.csv"
+
+rate_limit:
+  # 同一來源 IP + Signature 組合在此時間視窗內只處理一次（秒，預設 900 = 15 分鐘）
+  window_seconds: 900
+  # 最多快取幾組來源 + Signature 組合（超出時 LRU 淘汰）
+  maxsize: 10000

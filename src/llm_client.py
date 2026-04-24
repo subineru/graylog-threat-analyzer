@@ -1,8 +1,8 @@
 """
 LLM Client
 
-封裝內部 LLM API 呼叫邏輯。
-Phase 1 使用固定規則（不呼叫 LLM），Phase 2 切換到 LLM 研判。
+封裝內部 LLM API 呼叫邏輯（Gate 3）。
+Gate 1（known_fp）與 Rate Limit 由 TriageEngine 負責，此模組不再處理。
 """
 
 import json
@@ -13,13 +13,11 @@ from pathlib import Path
 import httpx
 from pydantic import BaseModel
 
-from .known_fp import KnownFPChecker
-
 logger = logging.getLogger(__name__)
 
 
 class TriageVerdict(BaseModel):
-    verdict: str  # normal | false_positive | anomalous
+    verdict: str  # normal | false_positive | anomalous | duplicate
     confidence: str  # high | medium | low
     reasoning: str
     recommended_action: str  # suppress | monitor | block
@@ -37,11 +35,6 @@ class LLMClient:
         self.api_key = llm_cfg.get("api_key", "")
         self.use_llm = bool(self.api_url and self.model)
 
-        # 載入 known_fp 規則
-        fp_csv = config.get("known_fp", {}).get("csv_path", "config/known_fp.csv")
-        self.known_fp = KnownFPChecker(fp_csv)
-
-        # 載入 prompt template
         prompt_path = Path("prompts/triage.md")
         if prompt_path.exists():
             self.prompt_template = prompt_path.read_text(encoding="utf-8")
@@ -49,31 +42,15 @@ class LLMClient:
             self.prompt_template = ""
             logger.warning("Prompt template not found at prompts/triage.md")
 
-    async def triage(self, enriched: dict) -> TriageVerdict:
-        """
-        研判單一事件。
-        Step 0: known_fp 快速過濾。
-        Phase 1: 使用固定規則。
-        Phase 2: 呼叫 LLM。
-        """
-        summary = enriched.get("event_summary", {})
-        fp_note = self.known_fp.check(summary)
-        if fp_note:
-            return TriageVerdict(
-                verdict="false_positive",
-                confidence="high",
-                reasoning=f"符合 known_fp 規則：{fp_note}",
-                recommended_action="suppress",
-            )
-
+    async def triage_gate3(self, enriched: dict) -> TriageVerdict:
+        """Gate 3：固定規則研判（無 LLM 時）或 LLM 語意研判。"""
         if not self.use_llm:
             return self._rule_based_triage(enriched)
-
         return await self._llm_triage(enriched)
 
     def _rule_based_triage(self, enriched: dict) -> TriageVerdict:
         """
-        Phase 1 固定規則研判。
+        固定規則研判（Gate 3 fallback）。
         規則優先順序由上到下，命中第一條即回傳。
         """
         summary = enriched.get("event_summary", {})
@@ -91,7 +68,7 @@ class LLMClient:
         dst_role = dst_asset.get("role", "unknown")
         src_known = src_asset.get("hostname", "unknown") != "unknown"
 
-        # 規則 1: PA 已阻擋的外部攻擊 → 已防禦的已知攻擊
+        # 規則 1: PA 已阻擋的外部攻擊
         if action in ("drop", "block-ip", "reset-both") and not self._is_internal(source_ip):
             return TriageVerdict(
                 verdict="false_positive",
@@ -110,11 +87,7 @@ class LLMClient:
             )
 
         # 規則 3: 已知端點對 AD 發起 NTLMSSP → Windows 正常認證
-        if (
-            src_role == "user-endpoint"
-            and dst_role == "domain-controller"
-            and "NTLMSSP" in sig_name
-        ):
+        if src_role == "user-endpoint" and dst_role == "domain-controller" and "NTLMSSP" in sig_name:
             return TriageVerdict(
                 verdict="normal",
                 confidence="high",
@@ -122,7 +95,7 @@ class LLMClient:
                 recommended_action="suppress",
             )
 
-        # 規則 4: 未知外部 IP（不在資產清冊 + 非 RFC1918）→ 高風險異常
+        # 規則 4: 未知外部 IP → 高風險異常
         if not src_known and not self._is_internal(source_ip):
             return TriageVerdict(
                 verdict="anomalous",
@@ -132,7 +105,7 @@ class LLMClient:
                 edl_entry=source_ip,
             )
 
-        # 規則 5: 未知內部 IP（不在資產清冊 + RFC1918）→ 疑似未授權設備
+        # 規則 5: 未知內部 IP → 疑似未授權設備
         if not src_known and self._is_internal(source_ip):
             return TriageVerdict(
                 verdict="anomalous",
@@ -151,7 +124,7 @@ class LLMClient:
                 recommended_action="monitor",
             )
 
-        # 預設: 標記為需要人工覆核
+        # 預設
         return TriageVerdict(
             verdict="anomalous",
             confidence="low",
@@ -185,18 +158,14 @@ class LLMClient:
                 resp.raise_for_status()
                 data = resp.json()
 
-            # 解析 LLM 回應
             message = data["choices"][0]["message"]
             content = message.get("content") or ""
 
-            # Fallback: 若 content 為空（chain-of-thought 模型可能只有 reasoning），
-            # 嘗試從 reasoning 欄位中萃取 JSON block
             if not content:
                 reasoning = message.get("reasoning") or ""
                 m = re.search(r'\{[^{}]*"verdict"[^{}]*\}', reasoning, re.DOTALL)
                 content = m.group(0) if m else ""
 
-            # 清理前後空白與 markdown code fence
             content = content.strip()
             if content.startswith("```"):
                 parts = content.split("\n", 1)
@@ -211,7 +180,6 @@ class LLMClient:
 
         except Exception as e:
             logger.error(f"LLM triage failed: {e}", exc_info=True)
-            # Fallback 到固定規則
             logger.info("Falling back to rule-based triage")
             return self._rule_based_triage(enriched)
 
@@ -225,7 +193,6 @@ class LLMClient:
         src_asset = asset.get("source_asset", {})
         dst_asset = asset.get("destination_asset", {})
 
-        # 使用 template 替換
         prompt = self.prompt_template
         replacements = {
             "{signature_id}": summary.get("signature_id", ""),
@@ -237,7 +204,7 @@ class LLMClient:
             "{destination_ip}": summary.get("destination_ip", ""),
             "{destination_user}": summary.get("destination_user", ""),
             "{application_name}": summary.get("protocol", ""),
-            "{network_transport}": "",  # 已包含在 protocol 中
+            "{network_transport}": "",
             "{direction}": summary.get("direction", ""),
             "{source_zone}": summary.get("zone_flow", "").split(" → ")[0] if " → " in summary.get("zone_flow", "") else "",
             "{destination_zone}": summary.get("zone_flow", "").split(" → ")[-1] if " → " in summary.get("zone_flow", "") else "",
