@@ -100,12 +100,13 @@ class TestEDLEntry:
 
 
 class TestRuleBasedTriage:
-    """測試 Phase 1 固定規則研判"""
+    """測試 Gate 3 固定規則研判（透過 TriageEngine）"""
 
     def test_blocked_external_attack(self):
-        from src.llm_client import LLMClient
+        from src.triage_engine import TriageEngine
+        import asyncio
 
-        client = LLMClient({"llm": {}})  # 無 LLM 設定，使用固定規則
+        engine = TriageEngine({"llm": {}})
         enriched = {
             "event_summary": {
                 "action": "drop",
@@ -119,15 +120,15 @@ class TestRuleBasedTriage:
                 "same_dst_same_sig_24h": 10,
             },
         }
-        import asyncio
-        verdict = asyncio.run(client.triage(enriched))
+        verdict = asyncio.run(engine.triage(enriched))
         assert verdict.verdict == "false_positive"
         assert verdict.confidence == "high"
 
     def test_informational_alert(self):
-        from src.llm_client import LLMClient
+        from src.triage_engine import TriageEngine
+        import asyncio
 
-        client = LLMClient({"llm": {}})
+        engine = TriageEngine({"llm": {}})
         enriched = {
             "event_summary": {
                 "action": "alert",
@@ -141,15 +142,14 @@ class TestRuleBasedTriage:
                 "same_dst_same_sig_24h": 5,
             },
         }
-        import asyncio
-        verdict = asyncio.run(client.triage(enriched))
+        verdict = asyncio.run(engine.triage(enriched))
         assert verdict.verdict == "normal"
 
     def test_ntlmssp_from_known_endpoint_to_dc(self):
-        from src.llm_client import LLMClient
+        from src.triage_engine import TriageEngine
         import asyncio
 
-        client = LLMClient({"llm": {}})
+        engine = TriageEngine({"llm": {}})
         enriched = {
             "event_summary": {
                 "action": "alert",
@@ -163,15 +163,15 @@ class TestRuleBasedTriage:
             },
             "frequency_context": {"same_src_same_sig_24h": 3, "same_src_other_sig_24h": 0, "same_dst_same_sig_24h": 20},
         }
-        verdict = asyncio.run(client.triage(enriched))
+        verdict = asyncio.run(engine.triage(enriched))
         assert verdict.verdict == "normal"
         assert verdict.confidence == "high"
 
     def test_unknown_external_ip(self):
-        from src.llm_client import LLMClient
+        from src.triage_engine import TriageEngine
         import asyncio
 
-        client = LLMClient({"llm": {}})
+        engine = TriageEngine({"llm": {}})
         enriched = {
             "event_summary": {
                 "action": "alert",
@@ -185,16 +185,16 @@ class TestRuleBasedTriage:
             },
             "frequency_context": {"same_src_same_sig_24h": 1, "same_src_other_sig_24h": 2, "same_dst_same_sig_24h": 1},
         }
-        verdict = asyncio.run(client.triage(enriched))
+        verdict = asyncio.run(engine.triage(enriched))
         assert verdict.verdict == "anomalous"
         assert verdict.confidence == "high"
         assert verdict.edl_entry == "45.33.32.156"
 
     def test_unknown_internal_ip(self):
-        from src.llm_client import LLMClient
+        from src.triage_engine import TriageEngine
         import asyncio
 
-        client = LLMClient({"llm": {}})
+        engine = TriageEngine({"llm": {}})
         enriched = {
             "event_summary": {
                 "action": "alert",
@@ -208,10 +208,10 @@ class TestRuleBasedTriage:
             },
             "frequency_context": {"same_src_same_sig_24h": 5, "same_src_other_sig_24h": 1, "same_dst_same_sig_24h": 5},
         }
-        verdict = asyncio.run(client.triage(enriched))
+        verdict = asyncio.run(engine.triage(enriched))
         assert verdict.verdict == "anomalous"
         assert verdict.confidence == "medium"
-        assert verdict.edl_entry is None  # 內部 IP 不自動加 EDL
+        assert verdict.edl_entry is None
 
 
 class TestEDLApproval:
@@ -246,7 +246,7 @@ class TestEDLApproval:
         assert success is True
         assert len(mgr.list_entries()) == 1
         assert mgr.list_entries()[0]["value"] == "5.6.7.8"
-        assert len(mgr.list_pending()) == 0  # 已 approved，從 pending 消失
+        assert len(mgr.list_pending()) == 0
 
     def test_approve_invalid_token(self, tmp_path):
         from src.edl_manager import EDLManager
@@ -263,7 +263,7 @@ class TestEDLApproval:
         success, msg = mgr.reject_entry(token)
         assert success is True
         assert len(mgr.list_pending()) == 0
-        assert len(mgr.list_entries()) == 0  # 拒絕後不寫入 EDL
+        assert len(mgr.list_entries()) == 0
 
 
 class TestKnownFP:
@@ -296,7 +296,7 @@ class TestKnownFP:
             "signature_id": "92322",
             "action": "alert",
             "source_ip": "10.0.5.48",
-            "destination_ip": "10.0.99.99",   # 不在清單內
+            "destination_ip": "10.0.99.99",
         })
         assert result is None
 
@@ -312,7 +312,6 @@ class TestKnownFP:
 
     def test_full_signature_name_extracted(self, tmp_path):
         checker = self._make_checker(tmp_path)
-        # 傳入完整格式 "Name(ID)"，_extract_id 應能正確取出 92322
         result = checker.check({
             "signature_id": "",
             "signature_name": "Microsoft Windows NTLMSSP Detection(92322)",
@@ -323,12 +322,12 @@ class TestKnownFP:
         assert result == "AD 正常 NTLM 認證"
 
     def test_triage_returns_false_positive(self, tmp_path):
-        from src.llm_client import LLMClient
+        from src.triage_engine import TriageEngine
         import asyncio
 
         csv_file = tmp_path / "known_fp.csv"
         csv_file.write_text(self.CSV_CONTENT, encoding="utf-8")
-        client = LLMClient({"llm": {}, "known_fp": {"csv_path": str(csv_file)}})
+        engine = TriageEngine({"llm": {}, "known_fp": {"csv_path": str(csv_file)}})
         enriched = {
             "event_summary": {
                 "signature_id": "92322",
@@ -338,7 +337,7 @@ class TestKnownFP:
                 "destination_ip": "192.168.2.7",
             }
         }
-        verdict = asyncio.run(client.triage(enriched))
+        verdict = asyncio.run(engine.triage(enriched))
         assert verdict.verdict == "false_positive"
         assert verdict.confidence == "high"
         assert verdict.recommended_action == "suppress"
@@ -364,7 +363,7 @@ class TestKnownFPCIDR:
             "signature_id": "92322",
             "action": "alert",
             "source_ip": "10.0.5.48",
-            "destination_ip": "192.168.2.100",  # 在 /24 內
+            "destination_ip": "192.168.2.100",
         })
         assert result == "AD 伺服器網段"
 
@@ -374,7 +373,7 @@ class TestKnownFPCIDR:
             "signature_id": "92322",
             "action": "alert",
             "source_ip": "10.0.5.48",
-            "destination_ip": "192.168.3.1",  # 不在 /24 內
+            "destination_ip": "192.168.3.1",
         })
         assert result is None
 
@@ -384,7 +383,7 @@ class TestKnownFPCIDR:
             "signature_id": "92322",
             "action": "alert",
             "source_ip": "10.0.5.48",
-            "destination_ip": "192.168.2.255",  # /24 最後一個位址
+            "destination_ip": "192.168.2.255",
         })
         assert result == "AD 伺服器網段"
 
@@ -399,12 +398,71 @@ class TestKnownFPCIDR:
         csv_file.write_text(csv_content, encoding="utf-8")
         checker = KnownFPChecker(str(csv_file))
 
-        # 精確 IP 命中
         assert checker.check({"signature_id": "92322", "action": "alert",
                                "source_ip": "", "destination_ip": "10.0.1.5"}) == "混合規則"
-        # CIDR 命中
         assert checker.check({"signature_id": "92322", "action": "alert",
                                "source_ip": "", "destination_ip": "192.168.2.200"}) == "混合規則"
-        # 兩者皆不符
         assert checker.check({"signature_id": "92322", "action": "alert",
                                "source_ip": "", "destination_ip": "10.0.2.1"}) is None
+
+
+class TestRateLimiter:
+    """測試 Rate Limiter 去重邏輯"""
+
+    def test_first_event_not_duplicate(self):
+        from src.rate_limiter import RateLimiter
+
+        rl = RateLimiter(window_seconds=900)
+        is_dup, count = rl.check_and_record("10.0.0.1", "92322")
+        assert is_dup is False
+        assert count == 1
+
+    def test_second_event_is_duplicate(self):
+        from src.rate_limiter import RateLimiter
+
+        rl = RateLimiter(window_seconds=900)
+        rl.check_and_record("10.0.0.1", "92322")
+        is_dup, count = rl.check_and_record("10.0.0.1", "92322")
+        assert is_dup is True
+        assert count == 2
+
+    def test_different_sig_not_duplicate(self):
+        from src.rate_limiter import RateLimiter
+
+        rl = RateLimiter(window_seconds=900)
+        rl.check_and_record("10.0.0.1", "92322")
+        is_dup, count = rl.check_and_record("10.0.0.1", "99999")
+        assert is_dup is False
+
+    def test_different_ip_not_duplicate(self):
+        from src.rate_limiter import RateLimiter
+
+        rl = RateLimiter(window_seconds=900)
+        rl.check_and_record("10.0.0.1", "92322")
+        is_dup, count = rl.check_and_record("10.0.0.2", "92322")
+        assert is_dup is False
+
+    def test_duplicate_suppressed_in_triage(self):
+        from src.triage_engine import TriageEngine
+        import asyncio
+
+        engine = TriageEngine({"llm": {}})
+        enriched = {
+            "event_summary": {
+                "action": "alert",
+                "severity": "high",
+                "source_ip": "10.0.5.99",
+                "signature_id": "77777",
+                "signature_name": "Duplicate Test(77777)",
+            },
+            "asset_context": {},
+            "frequency_context": {},
+        }
+
+        async def run_twice():
+            await engine.triage(enriched)          # 第一次：正常處理
+            return await engine.triage(enriched)   # 第二次：應被抑制
+
+        verdict = asyncio.run(run_twice())
+        assert verdict.verdict == "duplicate"
+        assert verdict.recommended_action == "suppress"
