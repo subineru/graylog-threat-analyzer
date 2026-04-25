@@ -22,6 +22,7 @@ class TriageVerdict(BaseModel):
     reasoning: str
     recommended_action: str  # suppress | monitor | block
     edl_entry: str | None = None
+    stage: str | None = None  # rate_limit | whitelist | gate3_rule | gate3_llm
 
 
 class LLMClient:
@@ -75,6 +76,7 @@ class LLMClient:
                 confidence="high",
                 reasoning=f"PA 已阻擋 (action={action})，來源為外部 IP，屬已防禦的已知攻擊。",
                 recommended_action="suppress",
+                stage="gate3_rule",
             )
 
         # 規則 2: informational + alert → 偵測型規則，正常行為
@@ -84,6 +86,7 @@ class LLMClient:
                 confidence="medium",
                 reasoning="Severity 為 informational，PA 僅 alert 未阻擋，大多為正常偵測。",
                 recommended_action="monitor",
+                stage="gate3_rule",
             )
 
         # 規則 3: 已知端點對 AD 發起 NTLMSSP → Windows 正常認證
@@ -93,6 +96,7 @@ class LLMClient:
                 confidence="high",
                 reasoning=f"已知 user-endpoint ({src_asset.get('hostname')}) 對 AD 網域控制站進行 NTLMSSP 認證，為正常 Windows 認證流程。",
                 recommended_action="suppress",
+                stage="gate3_rule",
             )
 
         # 規則 4: 未知外部 IP → 高風險異常
@@ -103,6 +107,7 @@ class LLMClient:
                 reasoning=f"來源 IP {source_ip} 不在資產清冊中且為外部 IP，屬未知外部裝置，建議封鎖。",
                 recommended_action="block",
                 edl_entry=source_ip,
+                stage="gate3_rule",
             )
 
         # 規則 5: 未知內部 IP → 疑似未授權設備
@@ -112,6 +117,7 @@ class LLMClient:
                 confidence="medium",
                 reasoning=f"來源 IP {source_ip} 不在資產清冊中，屬未知內部裝置，可能為未授權設備，需調查。",
                 recommended_action="monitor",
+                stage="gate3_rule",
             )
 
         # 規則 6: 同一來源短時間觸發多種 signature → 疑似掃描
@@ -122,6 +128,7 @@ class LLMClient:
                 confidence="medium",
                 reasoning=f"同一來源 IP 過去 24h 觸發 {other_sig_count} 種不同 signature，疑似掃描行為。",
                 recommended_action="monitor",
+                stage="gate3_rule",
             )
 
         # 預設
@@ -130,6 +137,7 @@ class LLMClient:
             confidence="low",
             reasoning="未命中任何已知規則，需要人工判斷。",
             recommended_action="monitor",
+            stage="gate3_rule",
         )
 
     async def _llm_triage(self, enriched: dict) -> TriageVerdict:
@@ -176,7 +184,9 @@ class LLMClient:
                 raise ValueError("LLM returned empty content after parsing")
 
             parsed = json.loads(content)
-            return TriageVerdict(**parsed)
+            v = TriageVerdict(**parsed)
+            v.stage = "gate3_llm"
+            return v
 
         except Exception as e:
             logger.error(f"LLM triage failed: {e}", exc_info=True)

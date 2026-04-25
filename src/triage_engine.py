@@ -7,9 +7,9 @@ Triage Engine
 
 import logging
 
-from .known_fp import KnownFPChecker
 from .llm_client import LLMClient, TriageVerdict
 from .rate_limiter import RateLimiter
+from .whitelist_manager import WhitelistManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +21,18 @@ class TriageEngine:
             window_seconds=rl_cfg.get("window_seconds", 900),
             maxsize=rl_cfg.get("maxsize", 10_000),
         )
-        fp_csv = config.get("known_fp", {}).get("csv_path", "config/known_fp.csv")
-        self.known_fp = KnownFPChecker(fp_csv)
+        # Support both "whitelist" (new) and "known_fp" (legacy) config keys
+        wl_cfg = config.get("whitelist") or config.get("known_fp", {})
+        fp_csv = wl_cfg.get("csv_path", "config/known_fp.csv")
+        default_ttl = wl_cfg.get("default_ttl_days", 90)
+        sweep_interval = wl_cfg.get("sweep_interval_seconds", 300)
+        self.whitelist = WhitelistManager(fp_csv, default_ttl_days=default_ttl, sweep_interval=sweep_interval)
         self.llm = LLMClient(config)
 
     async def triage(self, enriched: dict) -> TriageVerdict:
         """
         執行完整研判流程。
-        Rate Limit → Gate 1 → Gate 2（待 Phase 3）→ Gate 3
+        Rate Limit → Gate 1 (whitelist) → Gate 2（待 Phase 3）→ Gate 3
         """
         summary = enriched.get("event_summary", {})
         src_ip = summary.get("source_ip", "")
@@ -43,16 +47,18 @@ class TriageEngine:
                 confidence="high",
                 reasoning=f"同一來源 + Signature 在時間視窗內已處理，已抑制（累計 {count} 次）。",
                 recommended_action="suppress",
+                stage="rate_limit",
             )
 
-        # Gate 1：已知誤判白名單
-        fp_note = self.known_fp.check(summary)
+        # Gate 1：動態白名單（async，更新 hit_count / last_hit_time）
+        fp_note = await self.whitelist.check(summary)
         if fp_note:
             return TriageVerdict(
                 verdict="false_positive",
                 confidence="high",
-                reasoning=f"符合 known_fp 規則：{fp_note}",
+                reasoning=f"符合白名單規則：{fp_note}",
                 recommended_action="suppress",
+                stage="whitelist",
             )
 
         # Gate 2：開源黑名單（Phase 3 實作，目前 pass-through）
