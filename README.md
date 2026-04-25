@@ -24,50 +24,55 @@ sequenceDiagram
     participant GL as Graylog
     participant TA as Threat Analyzer
     participant Assets as assets.csv
-    participant WL as known_fp.csv (Whitelist)
+    participant WL as WhitelistManager
     participant GLAPI as Graylog Search API
     participant LLM as 內部 LLM
     participant Analyst as 資安人員
-    participant EDL as EDL 檔案
+    participant EDL as EDL Files
 
     PA->>GL: THREAT log (Syslog)
     GL->>GL: Pipeline 欄位正規化
     Note over GL: Event Definition 偵測<br/>RCVSS High / Medium 告警
-    GL->>TA: POST /webhook (Custom HTTP Notification)
-    TA-->>GL: 202 queued（立即回應）
+    GL->>TA: POST /webhook
+    TA-->>GL: 202 queued
 
     rect rgb(240, 248, 255)
-        Note over TA,GLAPI: Context Enrichment（背景執行）
-        TA->>Assets: source / destination IP 資產查詢
-        Assets-->>TA: hostname、role、department
-        TA->>GLAPI: 同 source + signature 過去 24h 頻率
-        GLAPI-->>TA: total_results（各維度事件數）
+        Note over TA,GLAPI: Context Enrichment (BackgroundTask)
+        TA->>Assets: IP 資產查詢
+        Assets-->>TA: hostname / role / department
+        TA->>GLAPI: 同 source + sig 過去 24h 頻率
+        GLAPI-->>TA: 各維度事件統計
     end
 
     rect rgb(255, 248, 240)
         Note over TA,LLM: Triage Pipeline
-        TA->>TA: Rate Limit（15 分鐘視窗內重複 → duplicate/suppress）
-        TA->>WL: 白名單規則比對（hit_count++，last_hit_time 更新）
-        alt 命中白名單
-            WL-->>TA: false_positive / suppress
-        else Gate 3：固定規則研判
-            TA->>TA: 規則比對（action / severity / 資產角色）
-        else Gate 3：LLM 研判
-            TA->>LLM: enriched context（結構化 prompt）
-            LLM-->>TA: verdict JSON
+        TA->>TA: Rate Limit - 15 min 視窗去重
+        alt 重複事件
+            TA-->>TA: duplicate / suppress
+        else 首次出現
+            TA->>WL: Gate 1 白名單比對
+            Note over WL: hit_count++ / last_hit_time 更新
+            alt 命中白名單
+                WL-->>TA: false_positive / suppress
+            else Gate 3 固定規則
+                TA->>TA: 規則比對 action / severity / 資產角色
+            else Gate 3 LLM
+                TA->>LLM: enriched context prompt
+                LLM-->>TA: verdict JSON
+            end
         end
         TA->>TA: SafeAudit 寫入 JSONL
     end
 
-    alt verdict = anomalous, confidence = high
-        TA->>Analyst: Email 告警（含 EDL 封鎖確認連結）
-        Analyst->>TA: GET /edl/approve/{token}
-        TA->>EDL: 寫入 block_ip.txt / block_url.txt / block_domain.txt
-        PA->>EDL: 定期拉取封鎖清單（GlobalProtect EDL）
-    else verdict = anomalous
+    alt anomalous + high confidence
+        TA->>Analyst: Email 告警 + EDL 確認連結
+        Analyst->>TA: GET /edl/approve/token
+        TA->>EDL: block_ip.txt / block_url.txt / block_domain.txt
+        PA->>EDL: 定期拉取 GlobalProtect EDL
+    else anomalous
         TA->>Analyst: Email 告警（需人工研判）
-    else verdict = false_positive / normal / duplicate
-        Note over TA: 記錄 log，不發送通知
+    else false_positive / normal / duplicate
+        Note over TA: 記錄 log，不通知
     end
 ```
 
