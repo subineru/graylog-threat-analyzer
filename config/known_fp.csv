@@ -1,14 +1,17 @@
 # 已知誤判清單 — 請填入實際的 signature / IP 組合
 # 此檔為範例，請依環境修改後使用
-# destination_ip 欄位支援逗號分隔多個 IP
-signature_id,signature_name,action,source_ip,destination_ip,rcvss,note
-92001,Apache Log4j Remote Code Execution Vulnerability,"drop,drop-packet,block-ip",,any,None,已被 PA 阻擋
-92046,Apache Log4j Remote Code Execution Vulnerability,"drop,drop-packet,block-ip",,any,None,已被 PA 阻擋
-91368,Microsoft Exchange Server SSRF Vulnerability,"drop,drop-packet,block-ip",bc.googleusercontent.com,10.0.1.30,None,Google bot 掃描 Exchange
-30844,HTTP Directory Traversal Request Attempt,reset-both,,10.0.1.30,None,
-31971,Adobe PDF File With Embedded Javascript,alert,,"10.0.1.21,10.0.1.30,10.0.1.40",None,內部 PDF 傳輸
-33338,HTTP SQL Injection Attempt,reset-both,10.0.2.10,,None,VPN gateway 誤判
-34460,Microsoft Windows GDI Plus Integer Overflow Vulnerability,alert,"10.0.1.20,10.0.1.21",,None,內部伺服器正常行為
-36540,PSEXEC SMB V2 Remote Execution Found,alert,10.0.4.100,,None,已知 IT 人員操作
-39154,Microsoft Office File with Macros Detected,alert,,"10.0.1.20,10.0.1.21,10.0.1.30,10.0.1.40,10.0.1.50",None,內部 Office 檔案流通
-92322,Microsoft Windows NTLMSSP Detection,alert,,"10.0.1.10,10.0.1.11",None,AD 正常 NTLM 認證
+# destination_ip 欄位支援逗號分隔多個 IP 或 CIDR 網段
+# ttl_days: 空白 = 使用 config 預設值；-1 = 永不過期
+# last_hit_time: ISO 8601，由程式自動維護；空白 = 從未命中（不自動清除）
+# status: confirmed（穩定規則）| testing（觀察中）
+signature_id,signature_name,action,source_ip,destination_ip,note,status,ttl_days,last_hit_time,hit_count
+92001,Apache Log4j Remote Code Execution Vulnerability,"drop,drop-packet,block-ip",,any,已被 PA 阻擋,confirmed,,,0
+92046,Apache Log4j Remote Code Execution Vulnerability,"drop,drop-packet,block-ip",,any,已被 PA 阻擋,confirmed,,,0
+91368,Microsoft Exchange Server SSRF Vulnerability,"drop,drop-packet,block-ip",bc.googleusercontent.com,10.0.1.30,Google bot 掃描 Exchange,confirmed,,,0
+30844,HTTP Directory Traversal Request Attempt,reset-both,,10.0.1.30,,confirmed,,,0
+31971,Adobe PDF File With Embedded Javascript,alert,,"10.0.1.21,10.0.1.30,10.0.1.40",內部 PDF 傳輸,confirmed,,,0
+33338,HTTP SQL Injection Attempt,reset-both,10.0.2.10,,VPN gateway 誤判,confirmed,,,0
+34460,Microsoft Windows GDI Plus Integer Overflow Vulnerability,alert,"10.0.1.20,10.0.1.21",,內部伺服器正常行為,confirmed,,,0
+36540,PSEXEC SMB V2 Remote Execution Found,alert,10.0.4.100,,已知 IT 人員操作,confirmed,,,0
+39154,Microsoft Office File with Macros Detected,alert,,"10.0.1.20,10.0.1.21,10.0.1.30,10.0.1.40,10.0.1.50",內部 Office 檔案流通,confirmed,,,0
+92322,Microsoft Windows NTLMSSP Detection,alert,,"10.0.1.10,10.0.1.11",AD 正常 NTLM 認證,confirmed,,,0

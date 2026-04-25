@@ -5,14 +5,18 @@ Graylog Threat Analyzer - Webhook Server
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
+from pathlib import Path
 
 import yaml
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from .edl_manager import EDLManager
 from .enrichment import EnrichmentService
 from .notifier import EmailNotifier
+from .safe_audit import SafeAudit
 from .triage_engine import TriageEngine
 
 logger = logging.getLogger(__name__)
@@ -109,14 +113,25 @@ async def lifespan(app: FastAPI):
     app.state.notifier = EmailNotifier(config)
     app.state.edl = EDLManager(config)
 
+    # SafeAudit：每日 JSONL 稽核
+    audit_dir = config.get("audit", {}).get("output_dir", "data/audit")
+    Path(audit_dir).mkdir(parents=True, exist_ok=True)
+    app.state.safe_audit = SafeAudit(audit_dir)
+
+    # 啟動白名單 sweeper
+    await app.state.triage.whitelist.start_sweeper()
+
     logger.info("Graylog Threat Analyzer started.")
     yield
+
+    # 停止 sweeper（會觸發最後一次 write_back）
+    await app.state.triage.whitelist.stop_sweeper()
     logger.info("Graylog Threat Analyzer stopped.")
 
 
 app = FastAPI(
     title="Graylog Threat Analyzer",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -166,6 +181,7 @@ async def process_single_event(state, payload: GraylogEvent, base_url: str = "")
     triage_engine = state.triage
     notifier = state.notifier
     edl_mgr = state.edl
+    safe_audit = state.safe_audit
 
     message = _normalize_event_fields(payload)
     enriched = await enrichment_svc.enrich(message)
@@ -205,12 +221,18 @@ async def process_single_event(state, payload: GraylogEvent, base_url: str = "")
     else:
         logger.info(f"Normal event: {event_summary}")
 
+    # 寫入稽核紀錄
+    stage = verdict.stage or "gate3_rule"
+    await safe_audit.record(enriched, verdict, stage)
+
     return {
         "status": "processed",
         "verdict": verdict.model_dump(),
         "summary": event_summary,
     }
 
+
+# --- EDL endpoints ---
 
 @app.get("/edl/approve/{token}")
 async def edl_approve(token: str, request: Request):
@@ -239,6 +261,74 @@ async def edl_list_pending(request: Request):
     return {"pending": edl_mgr.list_pending()}
 
 
+@app.patch("/edl/entry/{value:path}")
+async def edl_update_ttl(
+    value: str,
+    request: Request,
+    ttl_days: int = Body(..., embed=True),
+):
+    """
+    動態修改 EDL entry 的 TTL（per-entry）。
+    ttl_days = -1 表示永不過期。
+    """
+    if ttl_days != -1 and ttl_days <= 0:
+        raise HTTPException(status_code=422, detail="ttl_days 必須為正整數或 -1（永不過期）")
+    edl_mgr = request.app.state.edl
+    ok = edl_mgr.update_entry_ttl(value, ttl_days)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"EDL entry '{value}' not found")
+    return {"status": "updated", "value": value, "ttl_days": ttl_days}
+
+
+# --- Whitelist endpoints ---
+
+@app.post("/whitelist/reload")
+async def whitelist_reload(request: Request):
+    """熱重載白名單 CSV（手動編輯 known_fp.csv 後呼叫此 endpoint 生效）。"""
+    await request.app.state.triage.whitelist.reload()
+    return {"status": "reloaded"}
+
+
+# --- Audit endpoints ---
+
+@app.get("/audit/export")
+async def audit_export(
+    request: Request,
+    date_str: str = Query(default=None, alias="date", description="YYYY-MM-DD，預設為今天"),
+    format: str = Query(default="jsonl", description="jsonl 或 csv"),
+):
+    """
+    匯出稽核紀錄。
+    GET /audit/export?date=2026-04-24&format=csv
+    """
+    safe_audit: SafeAudit = request.app.state.safe_audit
+    target_date = date_str or str(date.today())
+
+    if format == "csv":
+        csv_str = safe_audit.export_csv(target_date)
+        if csv_str is None:
+            raise HTTPException(status_code=404, detail=f"No audit data for {target_date}")
+        return Response(
+            content=csv_str,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="audit_{target_date}.csv"'},
+        )
+    else:
+        path = safe_audit.export_jsonl(target_date)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"No audit data for {target_date}")
+
+        def iter_file():
+            with open(path, "rb") as f:
+                yield from f
+
+        return StreamingResponse(
+            iter_file(),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": f'attachment; filename="audit_{target_date}.jsonl"'},
+        )
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
@@ -246,7 +336,6 @@ async def health_check():
 
 if __name__ == "__main__":
     import sys
-    from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
     import uvicorn

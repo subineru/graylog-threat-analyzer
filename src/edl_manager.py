@@ -1,20 +1,27 @@
 """
 EDL (External Dynamic List) Manager
 
-管理 PA 防火牆用的 EDL 檔案，支援：
-- 新增 entry（IP / URL / Domain）
-- TTL 自動過期移除
-- 產生純文字 EDL 檔案供 PA 拉取
-- Pending 佇列 + 確認機制（高信心異常先送審，點擊 email 連結後才正式寫入）
+管理 PA / GlobalProtect 用的 EDL 檔案，支援：
+- 新增 entry（IP / URL / Domain），自動分類
+- TTL sliding window 自動延期；TTL = -1 永不過期
+- 產生符合 GlobalProtect 規範的純文字 EDL 檔案
+- Pending 佇列 + 確認機制
+- PATCH /edl/entry/{value} 可動態修改 per-entry TTL
 """
 
+import ipaddress
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
+
+from .expiry_policy import ExpiryPolicy
 
 logger = logging.getLogger(__name__)
+
+EntryType = Literal["ip", "url", "domain"]
 
 
 class EDLEntry:
@@ -23,46 +30,67 @@ class EDLEntry:
         value: str,
         added_at: str | None = None,
         ttl_days: int = 30,
+        last_activity: str | None = None,
         source_signature: str = "",
         source_event_id: str = "",
         added_by: str = "auto",
+        entry_type: str | None = None,
     ):
         self.value = value
         self.added_at = added_at or datetime.now(timezone.utc).isoformat()
-        self.ttl_days = ttl_days
         self.source_signature = source_signature
         self.source_event_id = source_event_id
         self.added_by = added_by
+        self.entry_type: str = entry_type or EDLManager.classify_entry(value)
 
+        # Sliding window TTL: use last_activity if given, else fall back to added_at
+        la_str = last_activity or self.added_at
+        self.expiry = ExpiryPolicy(
+            ttl_days=ttl_days,
+            last_activity=datetime.fromisoformat(la_str),
+        )
+
+    # Backward-compat properties so existing code / tests still work
     @property
-    def expires_at(self) -> datetime:
-        added = datetime.fromisoformat(self.added_at)
-        return added + timedelta(days=self.ttl_days)
+    def ttl_days(self) -> int:
+        return self.expiry.ttl_days
 
     @property
     def is_expired(self) -> bool:
-        return datetime.now(timezone.utc) > self.expires_at
+        return self.expiry.is_expired()
+
+    @property
+    def expires_at(self) -> datetime:
+        from datetime import timedelta
+        if self.expiry.last_activity is None:
+            return datetime.fromisoformat(self.added_at) + timedelta(days=self.expiry.ttl_days)
+        return self.expiry.last_activity + timedelta(days=self.expiry.ttl_days)
 
     def to_dict(self) -> dict:
         return {
-            "value": self.value,
-            "added_at": self.added_at,
-            "ttl_days": self.ttl_days,
-            "expires_at": self.expires_at.isoformat(),
+            "value":            self.value,
+            "added_at":         self.added_at,
+            "ttl_days":         self.expiry.ttl_days,
+            "last_activity":    self.expiry.last_activity.isoformat() if self.expiry.last_activity else None,
+            "entry_type":       self.entry_type,
             "source_signature": self.source_signature,
-            "source_event_id": self.source_event_id,
-            "added_by": self.added_by,
+            "source_event_id":  self.source_event_id,
+            "added_by":         self.added_by,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "EDLEntry":
+        # Backward compat: old format has no last_activity, use added_at
+        last_activity = data.get("last_activity") or data.get("added_at")
         return cls(
             value=data["value"],
             added_at=data.get("added_at"),
             ttl_days=data.get("ttl_days", 30),
+            last_activity=last_activity,
             source_signature=data.get("source_signature", ""),
             source_event_id=data.get("source_event_id", ""),
             added_by=data.get("added_by", "auto"),
+            entry_type=data.get("entry_type"),
         )
 
 
@@ -87,12 +115,12 @@ class PendingEntry:
 
     def to_dict(self) -> dict:
         return {
-            "value": self.value,
-            "token": self.token,
-            "suggested_at": self.suggested_at,
+            "value":            self.value,
+            "token":            self.token,
+            "suggested_at":     self.suggested_at,
             "source_signature": self.source_signature,
-            "source_event_id": self.source_event_id,
-            "status": self.status,
+            "source_event_id":  self.source_event_id,
+            "status":           self.status,
         }
 
     @classmethod
@@ -115,10 +143,10 @@ class EDLManager:
         self.metadata_path = self.output_dir / "edl_metadata.json"
         self.pending_path = self.output_dir / "edl_pending.json"
 
-        # EDL 檔案路徑（PA 會拉取這些）
-        self.edl_files = {
-            "ip": self.output_dir / "block_ip.txt",
-            "url": self.output_dir / "block_url.txt",
+        # EDL files served to PAN / GlobalProtect
+        self.edl_files: dict[str, Path] = {
+            "ip":     self.output_dir / "block_ip.txt",
+            "url":    self.output_dir / "block_url.txt",
             "domain": self.output_dir / "block_domain.txt",
         }
 
@@ -127,12 +155,30 @@ class EDLManager:
         self._load_metadata()
         self._load_pending()
 
+    # ------------------------------------------------------------------
+    # Entry type classification
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def classify_entry(value: str) -> str:
+        """Classify a value as 'ip', 'url', or 'domain'."""
+        try:
+            ipaddress.ip_network(value, strict=False)
+            return "ip"
+        except ValueError:
+            pass
+        if value.startswith(("http://", "https://", "*.")):
+            return "url"
+        return "domain"
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
     def _load_metadata(self):
-        """從 metadata 檔載入現有 entries"""
         if not self.metadata_path.exists():
             self._entries = []
             return
-
         try:
             with open(self.metadata_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -143,17 +189,14 @@ class EDLManager:
             self._entries = []
 
     def _save_metadata(self):
-        """儲存 metadata"""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         with open(self.metadata_path, "w", encoding="utf-8") as f:
             json.dump([e.to_dict() for e in self._entries], f, indent=2, ensure_ascii=False)
 
     def _load_pending(self):
-        """載入 pending 佇列"""
         if not self.pending_path.exists():
             self._pending = []
             return
-
         try:
             with open(self.pending_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -165,48 +208,43 @@ class EDLManager:
             self._pending = []
 
     def _save_pending(self):
-        """儲存 pending 佇列"""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         with open(self.pending_path, "w", encoding="utf-8") as f:
             json.dump([e.to_dict() for e in self._pending], f, indent=2, ensure_ascii=False)
 
+    # ------------------------------------------------------------------
+    # EDL file generation (GlobalProtect format)
+    # ------------------------------------------------------------------
+
     def _regenerate_edl_files(self):
-        """從 metadata 重新產生純文字 EDL 檔案"""
+        """Generate three plain-text EDL files in GlobalProtect format."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        ips, urls, domains = [], [], []
+        buckets: dict[str, list[str]] = {"ip": [], "url": [], "domain": []}
         for entry in self._entries:
             if entry.is_expired:
                 continue
-            v = entry.value
-            if v.startswith("http://") or v.startswith("https://"):
-                urls.append(v)
-            elif "." in v and not any(c == "/" for c in v):
-                parts = v.split(".")
-                if all(p.isdigit() for p in parts):
-                    ips.append(v)
-                else:
-                    domains.append(v)
-            else:
-                ips.append(v)
+            et = entry.entry_type or self.classify_entry(entry.value)
+            buckets[et].append(entry.value)
 
-        for edl_type, items, path in [
-            ("ip", ips, self.edl_files["ip"]),
-            ("url", urls, self.edl_files["url"]),
-            ("domain", domains, self.edl_files["domain"]),
-        ]:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write("\n".join(sorted(set(items))))
-                if items:
-                    f.write("\n")
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for edl_type, items in buckets.items():
+            items = sorted(set(items))
+            path = self.edl_files[edl_type]
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("# Generated by Graylog Threat Analyzer\n")
+                f.write(f"# Updated: {now_str}\n")
+                f.write(f"# Count: {len(items)}\n")
+                for item in items:
+                    f.write(item + "\n")
             logger.info(f"EDL {edl_type}: {len(items)} entries written to {path}")
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def suggest_entry(self, value: str, source_event: dict | None = None) -> str:
-        """
-        將 EDL 條目加入待審佇列，回傳確認用的 token。
-        高信心異常事件觸發此方法，需人工點擊 email 連結確認後才正式寫入 EDL。
-        """
-        # 如果已有相同 value 的 pending 條目，直接回傳其 token（避免重複）
+        """Queue an EDL entry for human approval. Returns confirmation token."""
         for entry in self._pending:
             if entry.value == value and entry.status == "pending":
                 logger.info(f"EDL pending entry already exists for {value}, reusing token.")
@@ -224,10 +262,7 @@ class EDLManager:
         return pending.token
 
     def approve_entry(self, token: str) -> tuple[bool, str]:
-        """
-        確認 pending 條目，正式寫入 EDL。
-        回傳 (success, message)。
-        """
+        """Approve a pending entry and write it to the EDL."""
         for entry in self._pending:
             if entry.token == token:
                 if entry.status == "approved":
@@ -235,7 +270,6 @@ class EDLManager:
                 if entry.status == "rejected":
                     return False, f"{entry.value} 已被拒絕，無法再次確認。"
 
-                # 正式加入 EDL
                 added = self.add_entry(
                     value=entry.value,
                     source_signature=entry.source_signature,
@@ -254,7 +288,7 @@ class EDLManager:
         return False, f"找不到 token={token} 的待審條目，可能已過期或不存在。"
 
     def reject_entry(self, token: str) -> tuple[bool, str]:
-        """拒絕 pending 條目（不寫入 EDL）。"""
+        """Reject a pending entry (not written to EDL)."""
         for entry in self._pending:
             if entry.token == token:
                 if entry.status != "pending":
@@ -267,7 +301,6 @@ class EDLManager:
         return False, f"找不到 token={token} 的待審條目。"
 
     def list_pending(self) -> list[dict]:
-        """列出所有待審條目"""
         return [e.to_dict() for e in self._pending if e.status == "pending"]
 
     def add_entry(
@@ -278,15 +311,22 @@ class EDLManager:
         source_event_id: str = "",
         added_by: str = "auto",
     ) -> bool:
-        """正式新增一筆 EDL entry"""
-        existing = [e for e in self._entries if e.value == value and not e.is_expired]
+        """
+        Add an entry to the EDL.
+        If entry already exists and is not expired, reset its TTL (sliding window).
+        Returns True if a new entry was created, False if existing was updated.
+        """
+        effective_ttl = ttl_days if ttl_days is not None else self.default_ttl_days
+        existing = next((e for e in self._entries if e.value == value and not e.is_expired), None)
         if existing:
-            logger.info(f"EDL entry already exists: {value}")
+            existing.expiry.touch()
+            self._save_metadata()
+            logger.info(f"EDL entry TTL reset (sliding window): {value}")
             return False
 
         entry = EDLEntry(
             value=value,
-            ttl_days=ttl_days or self.default_ttl_days,
+            ttl_days=effective_ttl,
             source_signature=source_signature,
             source_event_id=source_event_id,
             added_by=added_by,
@@ -294,11 +334,10 @@ class EDLManager:
         self._entries.append(entry)
         self._save_metadata()
         self._regenerate_edl_files()
-        logger.info(f"EDL entry added: {value} (TTL: {entry.ttl_days} days)")
+        logger.info(f"EDL entry added: {value} (TTL: {entry.ttl_days} days, type: {entry.entry_type})")
         return True
 
     def remove_entry(self, value: str) -> bool:
-        """移除一筆 EDL entry"""
         before = len(self._entries)
         self._entries = [e for e in self._entries if e.value != value]
         if len(self._entries) < before:
@@ -308,8 +347,17 @@ class EDLManager:
             return True
         return False
 
+    def update_entry_ttl(self, value: str, ttl_days: int) -> bool:
+        """Update TTL for an existing entry. ttl_days = -1 = permanent."""
+        for entry in self._entries:
+            if entry.value == value:
+                entry.expiry.ttl_days = ttl_days
+                self._save_metadata()
+                logger.info(f"EDL entry TTL updated: {value} → {ttl_days} days")
+                return True
+        return False
+
     def cleanup_expired(self) -> int:
-        """清理過期 entries，回傳移除數量"""
         before = len(self._entries)
         expired = [e for e in self._entries if e.is_expired]
         self._entries = [e for e in self._entries if not e.is_expired]
@@ -324,5 +372,4 @@ class EDLManager:
         return removed
 
     def list_entries(self) -> list[dict]:
-        """列出所有有效 entries"""
         return [e.to_dict() for e in self._entries if not e.is_expired]

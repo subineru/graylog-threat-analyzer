@@ -76,12 +76,21 @@ assets:
   # 資產清冊 CSV 路徑
   csv_path: "config/assets.csv"
 
-known_fp:
-  # 已知誤判清單 CSV 路徑
+whitelist:
+  # 已知誤判白名單 CSV 路徑
   csv_path: "config/known_fp.csv"
+  # TTL 預設值（天）：CSV 中 ttl_days 欄位空白時使用；-1 = 永不過期
+  default_ttl_days: 90
+  # Sweeper 執行間隔（秒），同時觸發 write_back
+  sweep_interval_seconds: 300
 
 rate_limit:
   # 同一來源 IP + Signature 組合在此時間視窗內只處理一次（秒，預設 900 = 15 分鐘）
   window_seconds: 900
   # 最多快取幾組來源 + Signature 組合（超出時 LRU 淘汰）
   maxsize: 10000
+
+audit:
+  # 稽核 JSONL 輸出目錄（每天一個檔案：YYYY-MM-DD.jsonl）
+  # GET /audit/export?date=YYYY-MM-DD&format=csv 可下載 CSV
+  output_dir: "data/audit"
