@@ -705,3 +705,82 @@ class TestSafeAudit:
         audit = SafeAudit(str(tmp_path))
         assert audit.export_csv("1999-01-01") is None
         assert audit.export_jsonl("1999-01-01") is None
+
+
+# ---------------------------------------------------------------------------
+# TestCustomListBackend — Gate 2 黑名單（CustomListBackend）
+# ---------------------------------------------------------------------------
+
+def _make_backend(tmp_path, content: str):
+    from src.backends.custom_list import CustomListBackend
+    f = tmp_path / "bl.txt"
+    f.write_text(content, encoding="utf-8")
+    return CustomListBackend(str(f))
+
+
+class TestCustomListBackend:
+    """測試 Gate 2 自訂黑名單：IP/CIDR 比對、注解、熱重載、計數"""
+
+    def test_hit_exact_ip(self, tmp_path):
+        bl = _make_backend(tmp_path, "203.0.113.1\n")
+        result = asyncio.run(bl.check("203.0.113.1", "10.0.0.1"))
+        assert result is not None
+        assert "203.0.113.1" in result
+
+    def test_hit_cidr(self, tmp_path):
+        bl = _make_backend(tmp_path, "203.0.113.0/24\n")
+        result = asyncio.run(bl.check("203.0.113.100", "10.0.0.1"))
+        assert result is not None
+
+    def test_miss(self, tmp_path):
+        bl = _make_backend(tmp_path, "203.0.113.0/24\n")
+        result = asyncio.run(bl.check("10.0.0.1", "10.0.0.2"))
+        assert result is None
+
+    def test_skip_comments_and_blank(self, tmp_path):
+        bl = _make_backend(tmp_path, "# comment\n\n203.0.113.1\n")
+        assert bl.stats["entry_count"] == 1
+
+    def test_reload_updates_entries(self, tmp_path):
+        f = tmp_path / "bl.txt"
+        f.write_text("203.0.113.1\n", encoding="utf-8")
+        from src.backends.custom_list import CustomListBackend
+        bl = CustomListBackend(str(f))
+        assert bl.stats["entry_count"] == 1
+        f.write_text("203.0.113.1\n1.2.3.4\n", encoding="utf-8")
+        asyncio.run(bl.reload())
+        assert bl.stats["entry_count"] == 2
+
+    def test_hit_count_increments(self, tmp_path):
+        bl = _make_backend(tmp_path, "203.0.113.0/24\n")
+
+        async def run():
+            await bl.check("203.0.113.1", "10.0.0.1")
+            await bl.check("203.0.113.2", "10.0.0.1")
+
+        asyncio.run(run())
+        assert bl.stats["hit_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# TestPanThreatNormalizer — PAN THREAT 欄位正規化
+# ---------------------------------------------------------------------------
+
+class TestPanThreatNormalizer:
+    """測試 PAN THREAT log 欄位正規化函式"""
+
+    def test_maps_alert_signature(self):
+        from src.normalizers.pan_threat import normalize
+        out = normalize({"alert_signature": "Log4j RCE(92001)"})
+        assert out["signature_name"] == "Log4j RCE(92001)"
+
+    def test_maps_vendor_severity(self):
+        from src.normalizers.pan_threat import normalize
+        out = normalize({"vendor_alert_severity": "informational"})
+        assert out["severity"] == "informational"
+
+    def test_preserves_unmapped_fields(self):
+        from src.normalizers.pan_threat import normalize
+        out = normalize({"custom_field": "value", "source_ip": "10.0.0.1"})
+        assert out["custom_field"] == "value"
+        assert out["source_ip"] == "10.0.0.1"

@@ -289,6 +289,44 @@ async def whitelist_reload(request: Request):
     return {"status": "reloaded"}
 
 
+@app.get("/whitelist/stats")
+async def whitelist_stats(request: Request):
+    """回傳每條白名單規則的命中統計。"""
+    wl = request.app.state.triage.whitelist
+    rules = []
+    for rule in wl._rules:
+        rules.append({
+            "signature_id": rule.signature_id,
+            "signature_name": rule.signature_name,
+            "note": rule.note,
+            "status": rule.status,
+            "hit_count": rule.hit_count,
+            "last_hit_time": rule.expiry.last_activity.isoformat() if rule.expiry.last_activity else None,
+        })
+    return {"count": len(rules), "rules": rules}
+
+
+# --- Blacklist endpoints ---
+
+@app.post("/blacklist/reload")
+async def blacklist_reload(request: Request):
+    """熱重載黑名單檔案（手動編輯 custom_blacklist.txt 後呼叫此 endpoint 生效）。"""
+    bl = request.app.state.triage.blacklist
+    if bl is None:
+        raise HTTPException(status_code=404, detail="Blacklist not enabled (set blacklist.enabled: true in config)")
+    await bl.reload()
+    return {"status": "reloaded", "stats": bl.stats}
+
+
+@app.get("/blacklist/stats")
+async def blacklist_stats(request: Request):
+    """回傳黑名單統計（筆數、命中次數、最後重載時間）。"""
+    bl = request.app.state.triage.blacklist
+    if bl is None:
+        return {"enabled": False}
+    return {"enabled": True, **bl.stats}
+
+
 # --- Audit endpoints ---
 
 @app.get("/audit/export")

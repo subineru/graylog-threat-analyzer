@@ -7,6 +7,8 @@ Triage Engine
 
 import logging
 
+from .blacklist_backend import BlacklistBackend
+from .backends.custom_list import CustomListBackend
 from .llm_client import LLMClient, TriageVerdict
 from .rate_limiter import RateLimiter
 from .whitelist_manager import WhitelistManager
@@ -29,10 +31,17 @@ class TriageEngine:
         self.whitelist = WhitelistManager(fp_csv, default_ttl_days=default_ttl, sweep_interval=sweep_interval)
         self.llm = LLMClient(config)
 
+        bl_cfg = config.get("blacklist", {})
+        self.blacklist: BlacklistBackend | None = None
+        if bl_cfg.get("enabled", False):
+            self.blacklist = CustomListBackend(
+                bl_cfg.get("custom_list_path", "config/custom_blacklist.txt")
+            )
+
     async def triage(self, enriched: dict) -> TriageVerdict:
         """
         執行完整研判流程。
-        Rate Limit → Gate 1 (whitelist) → Gate 2（待 Phase 3）→ Gate 3
+        Rate Limit → Gate 1 (whitelist) → Gate 2 (blacklist) → Gate 3
         """
         summary = enriched.get("event_summary", {})
         src_ip = summary.get("source_ip", "")
@@ -61,7 +70,19 @@ class TriageEngine:
                 stage="whitelist",
             )
 
-        # Gate 2：開源黑名單（Phase 3 實作，目前 pass-through）
+        # Gate 2：自訂黑名單（disabled by default；config.blacklist.enabled: true 啟用）
+        if self.blacklist:
+            dst_ip = summary.get("destination_ip", "")
+            bl_note = await self.blacklist.check(src_ip, dst_ip)
+            if bl_note:
+                logger.info(f"Blacklist hit: {bl_note}")
+                return TriageVerdict(
+                    verdict="anomalous",
+                    confidence="high",
+                    reasoning=f"來源 IP 命中黑名單：{bl_note}",
+                    recommended_action="block",
+                    stage="blacklist",
+                )
 
         # Gate 3：固定規則 + LLM
         return await self.llm.triage_gate3(enriched)

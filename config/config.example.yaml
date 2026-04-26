@@ -90,6 +90,14 @@ rate_limit:
   # 最多快取幾組來源 + Signature 組合（超出時 LRU 淘汰）
   maxsize: 10000
 
+blacklist:
+  # 是否啟用 Gate 2 自訂黑名單（預設 false，不影響現有流程）
+  enabled: false
+  # 黑名單後端：目前僅支援 custom_list（未來可插拔 AbuseIPDB / FireHOL 等）
+  backend: "custom_list"
+  # 純文字 IP/CIDR 檔案路徑（每行一筆，# 開頭為注解）
+  custom_list_path: "config/custom_blacklist.txt"
+
 audit:
   # 稽核 JSONL 輸出目錄（每天一個檔案：YYYY-MM-DD.jsonl）
   # GET /audit/export?date=YYYY-MM-DD&format=csv 可下載 CSV
