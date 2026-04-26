@@ -5,7 +5,7 @@ Graylog Threat Analyzer - Webhook Server
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -121,6 +121,7 @@ async def lifespan(app: FastAPI):
     # 啟動白名單 sweeper
     await app.state.triage.whitelist.start_sweeper()
 
+    app.state.started_at = datetime.now(timezone.utc)
     logger.info("Graylog Threat Analyzer started.")
     yield
 
@@ -368,8 +369,34 @@ async def audit_export(
 
 
 @app.get("/health")
-async def health_check():
-    return {"status": "ok"}
+async def health_check(request: Request):
+    state = request.app.state
+    uptime: int | None = None
+    try:
+        uptime = int((datetime.now(timezone.utc) - state.started_at).total_seconds())
+    except AttributeError:
+        pass
+
+    wl_count: int | None = None
+    try:
+        wl_count = len(state.triage.whitelist._rules)
+    except AttributeError:
+        pass
+
+    bl_info: dict = {"enabled": False}
+    try:
+        bl = state.triage.blacklist
+        if bl is not None:
+            bl_info = {"enabled": True, "entry_count": bl.stats["entry_count"]}
+    except AttributeError:
+        pass
+
+    return {
+        "status": "ok",
+        "uptime_seconds": uptime,
+        "whitelist_rules": wl_count,
+        "blacklist": bl_info,
+    }
 
 
 if __name__ == "__main__":
