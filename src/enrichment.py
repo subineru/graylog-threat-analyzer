@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 
 from .graylog_client import GraylogClient
+from .normalizers.pan_threat import normalize
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class EnrichmentService:
 
     async def enrich(self, message: dict) -> dict:
         """對單一事件進行完整 enrichment"""
+        message = normalize(message)
         source_ip = message.get("source_ip", "")
         destination_ip = message.get("destination_ip", "")
         threat_id = message.get("threat_id", "") or message.get("alert_signature", "")
@@ -80,7 +82,7 @@ class EnrichmentService:
             "event_summary": {
                 "signature_id": threat_id,
                 "signature_name": sig_name,
-                "severity": message.get("vendor_alert_severity", "unknown"),
+                "severity": message.get("severity") or message.get("vendor_alert_severity", "unknown"),
                 "action": message.get("vendor_event_action", "unknown"),
                 "source_ip": source_ip,
                 "source_user": message.get("source_user_name", ""),

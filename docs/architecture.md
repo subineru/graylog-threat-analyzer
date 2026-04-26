@@ -11,9 +11,10 @@ Palo Alto Networks 防火牆產生大量 THREAT log，目前透過 Graylog pipel
 ## 2. 設計目標
 
 - 將即時告警（High/Medium）推送至外部服務進行 enriched 研判
-- 透過 LLM 產出結構化 verdict，降低人工判讀時間
-- 建立 EDL 管理機制，支援自動阻擋與 TTL 過期
-- 低風險事件（Low/None）改用 batch 趨勢分析
+- 透過固定規則 + LLM 產出結構化 verdict，降低人工判讀時間
+- 建立動態白名單機制，資料驅動、支援 TTL 自動清除
+- 建立 EDL 管理機制，支援 GlobalProtect 格式、TTL 滑動視窗
+- 所有研判結果以 JSONL 稽核，提供 CSV 匯出
 
 ## 3. 系統架構
 
@@ -22,49 +23,74 @@ Palo Alto Networks 防火牆產生大量 THREAT log，目前透過 Graylog pipel
 ```
 Graylog Event Definition (filter: RCVSS in [High, Medium])
     │
-    ▼ HTTP Notification (webhook)
+    ▼ HTTP Notification (POST /webhook)
     │
-FastAPI webhook_server.py
+webhook_server.py  →  立即回傳 202 queued
     │
-    ├─ enrichment.py
-    │   ├─ 資產清冊查詢 (assets.csv: IP → hostname, role, department)
-    │   ├─ Graylog Search API (同 source_ip 近 24h 事件統計)
-    │   └─ 威脅情資查詢 (AbuseIPDB / OTX, 僅外部 IP)
-    │
-    ├─ llm_client.py
-    │   ├─ 組裝 enriched prompt (見 prompts/triage.md)
-    │   └─ 呼叫內部 LLM，解析結構化回應
-    │
-    └─ 行動路由
-        ├─ verdict=異常, confidence=high → 寄信 + 建議 EDL entry
-        ├─ verdict=異常, confidence!=high → 寄信請人工判斷
-        ├─ verdict=誤判 → 記錄到 known_fp.csv
-        └─ verdict=正常 → 僅記錄 log
+    └─ BackgroundTask
+        │
+        ├─ enrichment.py
+        │   ├─ 資產清冊查詢 (assets.csv: IP → hostname, role, department)
+        │   ├─ Graylog Search API (同 source_ip 近 24h 事件統計)
+        │   └─ 威脅情資查詢 (AbuseIPDB / OTX, stub)
+        │
+        ├─ triage_engine.py
+        │   ├─ Rate Limit (rate_limiter.py)
+        │   │   └─ 同 src_ip + sig_id 15 分鐘內重複 → duplicate/suppress
+        │   │
+        │   ├─ Gate 1: WhitelistManager (whitelist_manager.py)
+        │   │   ├─ known_fp.csv 規則比對（sig + action + IP/CIDR）
+        │   │   ├─ 命中 → hit_count++、last_hit_time 更新
+        │   │   ├─ per-rule TTL sliding window（-1 = 永不過期）
+        │   │   └─ 背景 sweeper：定期清除過期規則、write_back CSV
+        │   │
+        │   ├─ Gate 2: 黑名單（Phase 3，目前 pass-through）
+        │   │
+        │   └─ Gate 3: llm_client.py
+        │       ├─ 固定規則（6 條：PA 阻擋 / informational / NTLMSSP / 未知 IP 等）
+        │       └─ LLM 語意研判（OpenAI-compatible chat completions）
+        │
+        ├─ safe_audit.py
+        │   └─ 寫入 data/audit/YYYY-MM-DD.jsonl
+        │
+        └─ 行動路由
+            ├─ anomalous + high  → Email + EDL 建議（pending → 人工確認）
+            ├─ anomalous         → Email（人工研判）
+            ├─ false_positive    → suppress，log
+            ├─ normal            → log
+            └─ duplicate         → suppress，log
 ```
 
 ### 3.2 批次路線（Low / None）
 
 ```
+（Phase 4 規劃中）
 Cron (每日 08:00)
     │
-    ├─ 查 Graylog API：過去 24h RCVSS=None 的事件統計
-    │   - 按 source_ip 分群
-    │   - 按 signature 分群
-    │   - 標記重複攻擊來源
-    │
+    ├─ 查 Graylog API：過去 24h 低風險事件統計
     ├─ LLM 趨勢摘要
-    │
     └─ 寄送日報 / 週報
 ```
 
-## 4. 資料流
+## 4. 模組說明
 
-### 4.1 Webhook Payload
+| 模組 | 職責 |
+|------|------|
+| `webhook_server.py` | FastAPI 主入口；接收 webhook、路由行動、提供管理 API |
+| `triage_engine.py` | 串接 RL → Gate1 → Gate2 → Gate3 的研判主流程 |
+| `enrichment.py` | 資產查詢 + Graylog 頻率分析 + 情資 stub |
+| `whitelist_manager.py` | 動態白名單（Gate 1）：async、TTL sweep、hot-reload |
+| `expiry_policy.py` | 共用 TTL dataclass（sliding window，-1 = 永不過期） |
+| `llm_client.py` | Gate 3 固定規則 + LLM 呼叫；定義 TriageVerdict model |
+| `safe_audit.py` | 每日 JSONL 稽核；/audit/export CSV 匯出 |
+| `rate_limiter.py` | cachetools TTLCache 去重（threading.Lock） |
+| `edl_manager.py` | EDL pending queue + GlobalProtect 三檔輸出 + TTL |
+| `notifier.py` | HTML Email（aiosmtplib） |
+| `graylog_client.py` | Graylog Search API 頻率查詢（httpx） |
 
-Graylog HTTP Notification 預設會送出 event + backlog messages。
-本服務解析 `backlog` 中的原始 log fields。
+## 5. 資料結構
 
-### 4.2 Enriched Context 結構
+### 5.1 Enriched Context
 
 ```json
 {
@@ -74,11 +100,8 @@ Graylog HTTP Notification 預設會送出 event + backlog messages。
     "severity": "informational",
     "action": "alert",
     "source_ip": "10.0.5.48",
-    "source_user": "CORP\\user01",
     "destination_ip": "10.0.1.10",
-    "destination_user": "CORP\\svc_admin",
-    "protocol": "msrpc-base / tcp",
-    "direction": "client-to-server",
+    "source_user": "CORP\\user01",
     "zone_flow": "Untrust-VPN → Trust",
     "rule_name": "VPN-to-Internal"
   },
@@ -98,30 +121,63 @@ Graylog HTTP Notification 預設會送出 event + backlog messages。
 }
 ```
 
-### 4.3 LLM Verdict 結構
+### 5.2 TriageVerdict
 
 ```json
 {
-  "verdict": "normal | false_positive | anomalous",
+  "verdict": "normal | false_positive | anomalous | duplicate",
   "confidence": "high | medium | low",
-  "reasoning": "NTLM authentication over MSRPC is expected behavior for domain-joined VPN clients accessing AD resources.",
+  "reasoning": "...",
   "recommended_action": "suppress | monitor | block",
-  "edl_entry": null
+  "edl_entry": null,
+  "stage": "rate_limit | whitelist | gate3_rule | gate3_llm"
 }
 ```
 
-## 5. EDL 管理
+### 5.3 SafeAudit JSONL（每行一筆）
 
-- EDL 檔案為純文字，每行一筆 IP/URL/domain
-- 每筆 entry 附帶 metadata（加入時間、TTL、來源事件 ID）
-- metadata 存於 `edl_metadata.json`，EDL 純文字檔由此產生
-- Cron 定期檢查 TTL，過期自動移除
-- PA 透過 HTTP 定期拉取 EDL 檔案
+```json
+{
+  "timestamp": "2026-04-25T10:00:00+00:00",
+  "stage": "whitelist",
+  "verdict": { "verdict": "false_positive", "confidence": "high", ... },
+  "event_summary": { "source_ip": "10.0.5.48", "signature_id": "92322", ... }
+}
+```
 
-## 6. Phase 規劃
+## 6. TTL 機制
 
-| Phase | 範圍 | 預估時間 |
-|-------|------|----------|
-| 1 | Webhook receiver + enrichment + 固定規則 + Email | 2 週 |
-| 2 | 接入 LLM 替換固定規則 | 1-2 週 |
-| 3 | EDL 自動管理 + 趨勢分析 + 週報 | 2-3 週 |
+EDL entry 與 Whitelist rule 共用 `ExpiryPolicy`（`src/expiry_policy.py`）：
+
+| 特性 | 說明 |
+|------|------|
+| **Sliding window** | 每次命中（EDL re-add / Whitelist 規則匹配）自動重置計時 |
+| `ttl_days = -1` | 永不過期 |
+| `last_activity = None` | 從未命中 → 不觸發過期（不自動清除新規則） |
+| **per-entry / per-rule** | 每筆 EDL entry、每條 Whitelist 規則各自獨立 TTL |
+
+## 7. EDL GlobalProtect 格式
+
+輸出三個純文字檔，符合 PAN-OS External Dynamic List 規範：
+
+```
+# Generated by Graylog Threat Analyzer
+# Updated: 2026-04-25T10:00:00Z
+# Count: 3
+1.2.3.4
+5.6.7.8
+10.0.0.0/8
+```
+
+- `block_ip.txt` — IP 位址與 CIDR
+- `block_url.txt` — HTTP/HTTPS URL 與萬用字元（`*.evil.cn`）
+- `block_domain.txt` — 網域名稱
+
+## 8. Phase 規劃
+
+| Phase | 狀態 | 內容 |
+|-------|------|------|
+| 1 | ✅ 完成 | Webhook 接收、enrichment、BackgroundTask、固定規則、Email、Rate Limiter |
+| 2 | ✅ 完成 | WhitelistManager（TTL/hit tracking/hot-reload）、SafeAudit、EDL GlobalProtect 格式、ExpiryPolicy |
+| 3 | 🔲 規劃中 | Gate 2 可插拔黑名單（AbuseIPDB / FireHOL / custom list）；黑名單命中自動 EDL |
+| 4 | 🔲 規劃中 | `/learn/false_positive` AI 規則生成；`testing → confirmed` 升級流程；趨勢週報 |
