@@ -25,58 +25,36 @@ sequenceDiagram
     participant PA as PAN 防火牆
     participant GL as Graylog
     participant TA as Threat Analyzer
-    participant Assets as assets.csv
-    participant WL as WhitelistManager
-    participant GLAPI as Graylog Search API
     participant LLM as 內部 LLM
     participant Analyst as 資安人員
     participant EDL as EDL Files
 
     PA->>GL: THREAT log (Syslog)
-    GL->>GL: Pipeline 欄位正規化
-    Note over GL: Event Definition 偵測<br/>RCVSS High / Medium 告警
+    Note over GL: Event Definition 偵測 RCVSS High/Medium
     GL->>TA: POST /webhook
     TA-->>GL: 202 queued
 
     rect rgb(240, 248, 255)
-        Note over TA,GLAPI: Context Enrichment (BackgroundTask)
-        TA->>Assets: IP 資產查詢
-        Assets-->>TA: hostname / role / department
-        TA->>GLAPI: 同 source + sig 過去 24h 頻率
-        GLAPI-->>TA: 各維度事件統計
+        Note over TA: Context Enrichment (BackgroundTask)
+        TA->>TA: 資產查詢 + Graylog 24h 頻率分析
     end
 
     rect rgb(255, 248, 240)
-        Note over TA,LLM: Triage Pipeline
-        TA->>TA: Rate Limit - 15 min 視窗去重
-        alt 重複事件
-            TA-->>TA: duplicate / suppress
-        else 首次出現
-            TA->>WL: Gate 1 白名單比對
-            Note over WL: hit_count++ / last_hit_time 更新
-            alt 命中白名單
-                WL-->>TA: false_positive / suppress
-            else Gate 2 黑名單比對
-                TA->>TA: CustomListBackend IP/CIDR 比對
-                alt 命中黑名單
-                    TA-->>TA: anomalous / block
-                else Gate 3 固定規則
-                    TA->>TA: 規則比對 action / severity / 資產角色
-                else Gate 3 LLM
-                    TA->>LLM: enriched context prompt
-                    LLM-->>TA: verdict JSON
-                end
-            end
-        end
+        Note over TA,LLM: Triage Pipeline（逐層命中即回傳）
+        TA->>TA: Rate Limit — 視窗內重複 → duplicate/suppress
+        TA->>TA: Gate 1 白名單 — 命中 → false_positive/suppress
+        TA->>TA: Gate 1.5 EDL 封鎖 IP — 命中 → false_positive/suppress
+        TA->>TA: Gate 2 自訂黑名單 — 命中 → anomalous/block
+        TA->>LLM: Gate 3 固定規則 + LLM 研判 → verdict
         TA->>TA: SafeAudit 寫入 JSONL
     end
 
     alt anomalous + high confidence
         TA->>Analyst: Email 告警 + EDL 確認連結
         Analyst->>TA: GET /edl/approve/token
-        TA->>EDL: block_ip.txt / block_url.txt / block_domain.txt
+        TA->>EDL: block_ip / block_url / block_domain
         PA->>EDL: 定期拉取 GlobalProtect EDL
-    else anomalous
+    else anomalous（其他）
         TA->>Analyst: Email 告警（需人工研判）
     else false_positive / normal / duplicate
         Note over TA: 記錄 log，不通知

@@ -6,9 +6,6 @@ Triage Engine
 """
 
 import logging
-import threading
-
-from cachetools import TTLCache
 
 from .blacklist_backend import BlacklistBackend
 from .backends.custom_list import CustomListBackend
@@ -43,22 +40,6 @@ class TriageEngine:
 
         # Gate 1.5：EDL 主動封鎖檢查
         self._edl_mgr = edl_mgr
-        edl_cfg = config.get("edl", {})
-        self._edl_suppress_seconds: int = edl_cfg.get("active_suppress_seconds", -1)
-        if self._edl_suppress_seconds > 0:
-            self._edl_suppress_cache: TTLCache | None = TTLCache(
-                maxsize=10_000, ttl=self._edl_suppress_seconds
-            )
-            self._edl_suppress_lock: threading.Lock | None = threading.Lock()
-        else:
-            self._edl_suppress_cache = None
-            self._edl_suppress_lock = None
-
-    def mark_edl_suppressed(self, src_ip: str) -> None:
-        """確認 EDL entry 後預先填入抑制 cache，使第一次觸發安靜抑制。"""
-        if self._edl_suppress_cache is not None and self._edl_suppress_lock is not None:
-            with self._edl_suppress_lock:
-                self._edl_suppress_cache[src_ip] = True
 
     async def triage(self, enriched: dict) -> TriageVerdict:
         """
@@ -94,37 +75,12 @@ class TriageEngine:
 
         # Gate 1.5：EDL 主動封鎖檢查（已確認封鎖的 IP 不重複通知）
         if self._edl_mgr is not None and self._edl_mgr.is_active(src_ip):
-            if self._edl_suppress_seconds == -1:
-                # 靜默抑制直到 EDL entry 過期
-                logger.debug(f"EDL active suppress: src={src_ip}")
-                return TriageVerdict(
-                    verdict="false_positive",
-                    confidence="high",
-                    reasoning=f"來源 IP {src_ip} 已在 EDL 封鎖清單中，PA 正在阻擋，事件已抑制。",
-                    recommended_action="suppress",
-                    stage="edl_active",
-                )
-            # 週期性提醒模式（active_suppress_seconds > 0）
-            with self._edl_suppress_lock:
-                in_cache = src_ip in self._edl_suppress_cache
-                if not in_cache:
-                    self._edl_suppress_cache[src_ip] = True  # 重置抑制視窗
-            if in_cache:
-                logger.debug(f"EDL suppress cache hit: src={src_ip}")
-                return TriageVerdict(
-                    verdict="false_positive",
-                    confidence="high",
-                    reasoning=f"來源 IP {src_ip} 已在 EDL 封鎖清單中，抑制視窗內重複，已抑制。",
-                    recommended_action="suppress",
-                    stage="edl_active",
-                )
-            # 視窗已過期 → 發送定期提醒，讓分析師確認封鎖仍有效
-            logger.info(f"EDL active reminder: src={src_ip} (window={self._edl_suppress_seconds}s)")
+            logger.debug(f"EDL active suppress: src={src_ip}")
             return TriageVerdict(
-                verdict="anomalous",
-                confidence="low",
-                reasoning=f"來源 IP {src_ip} 已在 EDL 封鎖清單中（PA 持續阻擋），定期提醒通知。",
-                recommended_action="monitor",
+                verdict="false_positive",
+                confidence="high",
+                reasoning=f"來源 IP {src_ip} 已在 EDL 封鎖清單中，PA 正在阻擋，事件已抑制。",
+                recommended_action="suppress",
                 stage="edl_active",
             )
 

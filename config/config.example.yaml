@@ -69,13 +69,8 @@ smtp:
 edl:
   # EDL 檔案輸出路徑（PA 會透過 HTTP 拉取）
   output_dir: "/var/www/edl"
-  # 預設 TTL（天），過期自動移除
+  # 預設 TTL（天），過期自動移除；-1 = 永不過期
   default_ttl_days: 30
-  # 已在 EDL 封鎖中的來源 IP 抑制視窗（秒）：
-  # -1 = 靜默抑制直到 EDL entry 過期（預設，不發送重複 Email）
-  # >0 = 視窗內靜默抑制；視窗過期後每次觸發發送一封定期提醒 Email
-  #      例：86400 = 24 小時，604800 = 7 天
-  active_suppress_seconds: -1
 
 assets:
   # 資產清冊 CSV 路徑

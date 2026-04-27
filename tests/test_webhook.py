@@ -810,7 +810,7 @@ _ENRICHED_EDL = {
 }
 
 
-def _make_edl_engine(tmp_path, active_suppress_seconds=-1):
+def _make_edl_engine(tmp_path):
     from src.edl_manager import EDLManager
     from src.triage_engine import TriageEngine
 
@@ -821,7 +821,6 @@ def _make_edl_engine(tmp_path, active_suppress_seconds=-1):
     config = {
         "rate_limit": {"window_seconds": 900, "maxsize": 100},
         "whitelist": {"csv_path": str(wl_csv), "default_ttl_days": 90},
-        "edl": {"active_suppress_seconds": active_suppress_seconds},
         "llm": {},
     }
     return TriageEngine(config, edl_mgr=edl_mgr), edl_mgr
@@ -862,29 +861,6 @@ class TestEDLActiveGate:
         engine, _ = _make_edl_engine(tmp_path)
         verdict = asyncio.run(engine.triage(_ENRICHED_EDL))
         assert verdict.stage != "edl_active"
-
-    def test_periodic_reminder_after_cache_expiry(self, tmp_path):
-        """active_suppress_seconds>0：cache 過期後下一次觸發為定期提醒"""
-        engine, edl_mgr = _make_edl_engine(tmp_path, active_suppress_seconds=1)
-        edl_mgr.add_entry("1.2.3.4")
-
-        # 每次用不同 sig_id 避開 Rate Limiter 去重
-        def _event(sig):
-            return {**_ENRICHED_EDL, "event_summary": {**_ENRICHED_EDL["event_summary"], "signature_id": sig}}
-
-        async def run():
-            v1 = await engine.triage(_event("sig-a"))
-            # 第一次：cache miss → 加入 cache，發送提醒（anomalous/low）
-            assert v1.stage == "edl_active"
-            assert v1.verdict == "anomalous"
-            # 清空 cache 模擬視窗過期
-            engine._edl_suppress_cache.clear()
-            v2 = await engine.triage(_event("sig-b"))
-            # 再次 cache miss → 再次提醒
-            assert v2.stage == "edl_active"
-            assert v2.verdict == "anomalous"
-
-        asyncio.run(run())
 
     def test_get_pending_value(self, tmp_path):
         from src.edl_manager import EDLManager
