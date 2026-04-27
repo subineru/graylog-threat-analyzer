@@ -373,3 +373,30 @@ class EDLManager:
 
     def list_entries(self) -> list[dict]:
         return [e.to_dict() for e in self._entries if not e.is_expired]
+
+    def is_active(self, value: str) -> bool:
+        """Return True if value matches a confirmed, non-expired EDL entry (exact or CIDR)."""
+        try:
+            addr = ipaddress.ip_address(value)
+        except ValueError:
+            addr = None
+
+        for e in self._entries:
+            if e.is_expired:
+                continue
+            if e.value == value:
+                return True
+            if addr is not None and e.entry_type == "ip":
+                try:
+                    if addr in ipaddress.ip_network(e.value, strict=False):
+                        return True
+                except ValueError:
+                    pass
+        return False
+
+    def get_pending_value(self, token: str) -> str | None:
+        """Return the value associated with a pending token, or None."""
+        for entry in self._pending:
+            if entry.token == token:
+                return entry.value
+        return None

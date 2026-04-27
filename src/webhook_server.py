@@ -109,9 +109,9 @@ async def lifespan(app: FastAPI):
     config = load_config()
     app.state.config = config
     app.state.enrichment = EnrichmentService(config)
-    app.state.triage = TriageEngine(config)
-    app.state.notifier = EmailNotifier(config)
     app.state.edl = EDLManager(config)
+    app.state.triage = TriageEngine(config, edl_mgr=app.state.edl)
+    app.state.notifier = EmailNotifier(config)
 
     # SafeAudit：每日 JSONL 稽核
     audit_dir = config.get("audit", {}).get("output_dir", "data/audit")
@@ -239,8 +239,12 @@ async def process_single_event(state, payload: GraylogEvent, base_url: str = "")
 async def edl_approve(token: str, request: Request):
     """點擊 email 中的確認連結後呼叫此 endpoint，將 pending EDL 條目正式寫入。"""
     edl_mgr = request.app.state.edl
+    value = edl_mgr.get_pending_value(token)
     success, message = edl_mgr.approve_entry(token)
     if success:
+        if value:
+            # 預先填入抑制 cache，使 EDL 確認後第一次觸發安靜抑制
+            request.app.state.triage.mark_edl_suppressed(value)
         return {"status": "approved", "message": message}
     raise HTTPException(status_code=400, detail=message)
 

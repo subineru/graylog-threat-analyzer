@@ -22,7 +22,7 @@ class TriageVerdict(BaseModel):
     reasoning: str
     recommended_action: str  # suppress | monitor | block
     edl_entry: str | None = None
-    stage: str | None = None  # rate_limit | whitelist | gate3_rule | gate3_llm
+    stage: str | None = None  # rate_limit | whitelist | edl_active | blacklist | gate3_rule | gate3_llm
 
 
 class LLMClient:
