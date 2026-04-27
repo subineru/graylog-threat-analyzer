@@ -784,3 +784,87 @@ class TestPanThreatNormalizer:
         out = normalize({"custom_field": "value", "source_ip": "10.0.0.1"})
         assert out["custom_field"] == "value"
         assert out["source_ip"] == "10.0.0.1"
+
+
+# ---------------------------------------------------------------------------
+# TestEDLActiveGate — Gate 1.5：EDL 主動封鎖抑制
+# ---------------------------------------------------------------------------
+
+_EDL_GATE_WL_CSV = (
+    "signature_id,signature_name,action,source_ip,destination_ip,"
+    "note,status,ttl_days,last_hit_time,hit_count\n"
+)
+
+_ENRICHED_EDL = {
+    "event_summary": {
+        "source_ip": "1.2.3.4",
+        "destination_ip": "10.0.0.1",
+        "signature_id": "9999",
+        "signature_name": "Test Sig",
+        "action": "alert",
+        "severity": "high",
+    },
+    "asset_context": {},
+    "frequency_context": {},
+    "threat_intel": {},
+}
+
+
+def _make_edl_engine(tmp_path):
+    from src.edl_manager import EDLManager
+    from src.triage_engine import TriageEngine
+
+    wl_csv = tmp_path / "wl.csv"
+    wl_csv.write_text(_EDL_GATE_WL_CSV, encoding="utf-8")
+
+    edl_mgr = EDLManager({"edl": {"output_dir": str(tmp_path / "edl"), "default_ttl_days": 30}})
+    config = {
+        "rate_limit": {"window_seconds": 900, "maxsize": 100},
+        "whitelist": {"csv_path": str(wl_csv), "default_ttl_days": 90},
+        "llm": {},
+    }
+    return TriageEngine(config, edl_mgr=edl_mgr), edl_mgr
+
+
+class TestEDLActiveGate:
+    """測試 Gate 1.5：EDL 主動封鎖 IP 的 Email 抑制機制"""
+
+    def test_is_active_false_for_pending_only(self, tmp_path):
+        from src.edl_manager import EDLManager
+        mgr = EDLManager({"edl": {"output_dir": str(tmp_path), "default_ttl_days": 30}})
+        mgr.suggest_entry("1.2.3.4")
+        assert mgr.is_active("1.2.3.4") is False
+
+    def test_is_active_true_after_approve(self, tmp_path):
+        from src.edl_manager import EDLManager
+        mgr = EDLManager({"edl": {"output_dir": str(tmp_path), "default_ttl_days": 30}})
+        token = mgr.suggest_entry("1.2.3.4")
+        mgr.approve_entry(token)
+        assert mgr.is_active("1.2.3.4") is True
+
+    def test_is_active_cidr_match(self, tmp_path):
+        from src.edl_manager import EDLManager
+        mgr = EDLManager({"edl": {"output_dir": str(tmp_path), "default_ttl_days": 30}})
+        mgr.add_entry("1.2.3.0/24")
+        assert mgr.is_active("1.2.3.100") is True
+        assert mgr.is_active("5.6.7.8") is False
+
+    def test_suppresses_edl_active_ip(self, tmp_path):
+        engine, edl_mgr = _make_edl_engine(tmp_path)
+        edl_mgr.add_entry("1.2.3.4")
+        verdict = asyncio.run(engine.triage(_ENRICHED_EDL))
+        assert verdict.stage == "edl_active"
+        assert verdict.recommended_action == "suppress"
+        assert verdict.verdict == "false_positive"
+
+    def test_not_suppressed_when_ip_not_in_edl(self, tmp_path):
+        engine, _ = _make_edl_engine(tmp_path)
+        verdict = asyncio.run(engine.triage(_ENRICHED_EDL))
+        assert verdict.stage != "edl_active"
+
+    def test_get_pending_value(self, tmp_path):
+        from src.edl_manager import EDLManager
+        mgr = EDLManager({"edl": {"output_dir": str(tmp_path), "default_ttl_days": 30}})
+        token = mgr.suggest_entry("9.9.9.9")
+        assert mgr.get_pending_value(token) == "9.9.9.9"
+        assert mgr.get_pending_value("nonexistent") is None

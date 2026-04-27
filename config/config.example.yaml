@@ -69,7 +69,7 @@ smtp:
 edl:
   # EDL 檔案輸出路徑（PA 會透過 HTTP 拉取）
   output_dir: "/var/www/edl"
-  # 預設 TTL（天），過期自動移除
+  # 預設 TTL（天），過期自動移除；-1 = 永不過期
   default_ttl_days: 30
 
 assets:

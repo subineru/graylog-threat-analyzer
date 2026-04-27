@@ -109,9 +109,9 @@ async def lifespan(app: FastAPI):
     config = load_config()
     app.state.config = config
     app.state.enrichment = EnrichmentService(config)
-    app.state.triage = TriageEngine(config)
-    app.state.notifier = EmailNotifier(config)
     app.state.edl = EDLManager(config)
+    app.state.triage = TriageEngine(config, edl_mgr=app.state.edl)
+    app.state.notifier = EmailNotifier(config)
 
     # SafeAudit：每日 JSONL 稽核
     audit_dir = config.get("audit", {}).get("output_dir", "data/audit")

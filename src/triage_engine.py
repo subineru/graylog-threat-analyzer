@@ -2,7 +2,7 @@
 Triage Engine
 
 串接各 Gate 的研判主流程：
-  Rate Limit → Gate 1（動態白名單）→ Gate 2（黑名單，Phase 3）→ Gate 3（規則 + LLM）
+  Rate Limit → Gate 1（動態白名單）→ Gate 1.5（EDL 已封鎖）→ Gate 2（黑名單）→ Gate 3（規則 + LLM）
 """
 
 import logging
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class TriageEngine:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, edl_mgr=None):
         rl_cfg = config.get("rate_limit", {})
         self.rate_limiter = RateLimiter(
             window_seconds=rl_cfg.get("window_seconds", 900),
@@ -38,10 +38,13 @@ class TriageEngine:
                 bl_cfg.get("custom_list_path", "config/custom_blacklist.txt")
             )
 
+        # Gate 1.5：EDL 主動封鎖檢查
+        self._edl_mgr = edl_mgr
+
     async def triage(self, enriched: dict) -> TriageVerdict:
         """
         執行完整研判流程。
-        Rate Limit → Gate 1 (whitelist) → Gate 2 (blacklist) → Gate 3
+        Rate Limit → Gate 1 (whitelist) → Gate 1.5 (EDL active) → Gate 2 (blacklist) → Gate 3
         """
         summary = enriched.get("event_summary", {})
         src_ip = summary.get("source_ip", "")
@@ -68,6 +71,17 @@ class TriageEngine:
                 reasoning=f"符合白名單規則：{fp_note}",
                 recommended_action="suppress",
                 stage="whitelist",
+            )
+
+        # Gate 1.5：EDL 主動封鎖檢查（已確認封鎖的 IP 不重複通知）
+        if self._edl_mgr is not None and self._edl_mgr.is_active(src_ip):
+            logger.debug(f"EDL active suppress: src={src_ip}")
+            return TriageVerdict(
+                verdict="false_positive",
+                confidence="high",
+                reasoning=f"來源 IP {src_ip} 已在 EDL 封鎖清單中，PA 正在阻擋，事件已抑制。",
+                recommended_action="suppress",
+                stage="edl_active",
             )
 
         # Gate 2：自訂黑名單（disabled by default；config.blacklist.enabled: true 啟用）

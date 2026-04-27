@@ -3,7 +3,7 @@
 # destination_ip 欄位支援逗號分隔多個 IP 或 CIDR 網段
 # ttl_days: 空白 = 使用 config 預設值；-1 = 永不過期
 # last_hit_time: ISO 8601，由程式自動維護；空白 = 從未命中（不自動清除）
-# status: confirmed（穩定規則）| testing（觀察中）
+# status: confirmed（穩定規則）| monitoring（觀察中）
 signature_id,signature_name,action,source_ip,destination_ip,note,status,ttl_days,last_hit_time,hit_count
 92001,Apache Log4j Remote Code Execution Vulnerability,"drop,drop-packet,block-ip",,any,已被 PA 阻擋,confirmed,,,0
 92046,Apache Log4j Remote Code Execution Vulnerability,"drop,drop-packet,block-ip",,any,已被 PA 阻擋,confirmed,,,0
