@@ -6,9 +6,11 @@
 
 ## 功能特色
 
-- **多層次研判流水線**：Rate Limit 去重 → 白名單快速過濾 → 固定規則 → LLM 語意研判，逐層遞進
+- **多層次研判流水線**：Rate Limit 去重 → 白名單快速過濾 → 黑名單比對 → 固定規則 → LLM 語意研判，逐層遞進
 - **Context Enrichment**：資產清冊查詢（IP → 主機角色/部門）、Graylog 歷史頻率分析
 - **動態白名單（WhitelistManager）**：`known_fp.csv` 資料驅動，per-rule TTL 滑動視窗（`-1` = 永不過期），自動追蹤 `hit_count` / `last_hit_time`，支援 hot-reload（`POST /whitelist/reload`）
+- **Gate 2 黑名單（BlacklistBackend）**：可插拔黑名單介面，內建 `CustomListBackend`（純文字 IP/CIDR 檔），命中即回傳 `anomalous/block`；預設 disabled，設定 `blacklist.enabled: true` 啟用
+- **PAN 欄位正規化（pan_threat normalizer）**：統一對應 Graylog 原始欄位名稱至 enrichment 所需格式
 - **EDL 封鎖管理**：高置信度異常自動產生封鎖建議；Email 含一鍵確認連結；EDL 檔案符合 **GlobalProtect 規範**（IP / URL / Domain 三檔分離），per-entry TTL 滑動視窗
 - **稽核追蹤（SafeAudit）**：每個研判結果寫入每日 JSONL，`GET /audit/export?format=csv` 可下載分析師用 CSV
 - **共用 TTL 機制（ExpiryPolicy）**：EDL 與 Whitelist 共用同一套 TTL dataclass，sliding window + `-1` 永不過期
@@ -54,11 +56,16 @@ sequenceDiagram
             Note over WL: hit_count++ / last_hit_time 更新
             alt 命中白名單
                 WL-->>TA: false_positive / suppress
-            else Gate 3 固定規則
-                TA->>TA: 規則比對 action / severity / 資產角色
-            else Gate 3 LLM
-                TA->>LLM: enriched context prompt
-                LLM-->>TA: verdict JSON
+            else Gate 2 黑名單比對
+                TA->>TA: CustomListBackend IP/CIDR 比對
+                alt 命中黑名單
+                    TA-->>TA: anomalous / block
+                else Gate 3 固定規則
+                    TA->>TA: 規則比對 action / severity / 資產角色
+                else Gate 3 LLM
+                    TA->>LLM: enriched context prompt
+                    LLM-->>TA: verdict JSON
+                end
             end
         end
         TA->>TA: SafeAudit 寫入 JSONL
@@ -86,6 +93,7 @@ sequenceDiagram
 |------|------|----------|------|-------|
 | **RL** | **Rate Limit** | 同 src_ip + sig_id 在 15 分鐘視窗內重複出現 | `duplicate` / suppress | `rate_limit` |
 | **G1** | **白名單（known_fp.csv）** | 符合 signature + action + IP 規則（支援 CIDR） | `false_positive` / suppress | `whitelist` |
+| **G2** | **黑名單（custom_blacklist.txt）** | src_ip 命中 IP/CIDR 黑名單（需 `enabled: true`） | `anomalous` / block | `blacklist` |
 | G3-1 | **固定規則：PA 已阻擋** | action = drop/block-ip/reset-both，外部 IP | `false_positive` | `gate3_rule` |
 | G3-2 | **固定規則：informational alert** | severity = informational，action = alert | `normal` | `gate3_rule` |
 | G3-3 | **固定規則：已知端點 → AD** | src = user-endpoint，dst = domain-controller，NTLMSSP | `normal` | `gate3_rule` |
@@ -102,21 +110,27 @@ sequenceDiagram
 ```
 graylog-threat-analyzer/
 ├── src/
-│   ├── webhook_server.py      # FastAPI 主入口；/webhook、/audit/export、/whitelist/reload
-│   ├── triage_engine.py       # 研判主流程：RL → Gate1 → Gate3
+│   ├── webhook_server.py      # FastAPI 主入口；/webhook、/audit/export、/whitelist/reload 等
+│   ├── triage_engine.py       # 研判主流程：RL → Gate1 → Gate2 → Gate3
 │   ├── enrichment.py          # Context enrichment（資產、頻率）
 │   ├── graylog_client.py      # Graylog Search API 封裝
 │   ├── llm_client.py          # LLM 研判（Gate 3）+ TriageVerdict model
 │   ├── whitelist_manager.py   # 動態白名單（Gate 1）：TTL sweep、hit tracking、hot-reload
+│   ├── blacklist_backend.py   # Gate 2 抽象介面（BlacklistBackend ABC）
 │   ├── expiry_policy.py       # 共用 TTL dataclass（sliding window，-1 = 永不過期）
 │   ├── safe_audit.py          # 每日 JSONL 稽核寫入 + CSV 匯出
 │   ├── rate_limiter.py        # 15 分鐘視窗去重
 │   ├── notifier.py            # HTML Email 通知
-│   └── edl_manager.py         # EDL 管理（GlobalProtect 格式、pending queue、TTL）
+│   ├── edl_manager.py         # EDL 管理（GlobalProtect 格式、pending queue、TTL）
+│   ├── backends/
+│   │   └── custom_list.py     # Gate 2 實作：純文字 IP/CIDR 黑名單，支援 hot-reload
+│   └── normalizers/
+│       └── pan_threat.py      # PAN THREAT log 欄位正規化（Graylog 原始欄位 → enrichment 格式）
 ├── config/
 │   ├── config.example.yaml    # 設定範本
 │   ├── assets.csv             # IP 資產清冊（IP → hostname/role/department）
-│   └── known_fp.csv           # 已知誤判白名單規則
+│   ├── known_fp.csv           # 已知誤判白名單規則
+│   └── custom_blacklist.txt   # 自訂黑名單（IP/CIDR，Gate 2 使用）
 ├── data/
 │   └── audit/                 # 每日 JSONL 稽核（YYYY-MM-DD.jsonl，自動建立）
 ├── prompts/
@@ -170,6 +184,7 @@ curl http://localhost:8000/health
 | `edl` | `output_dir`, `default_ttl_days` | PA/GlobalProtect 可透過 HTTP 拉取此目錄的封鎖清單 |
 | `assets` | `csv_path` | IP 資產清冊 CSV |
 | `whitelist` | `csv_path`, `default_ttl_days`, `sweep_interval_seconds` | 已知誤判白名單；TTL 預設 90 天；`-1` = 永不過期 |
+| `blacklist` | `enabled`, `custom_list_path` | Gate 2 黑名單；預設 `false`（disabled，不影響現有流程） |
 | `rate_limit` | `window_seconds`, `maxsize` | 去重視窗（預設 15 分鐘） |
 | `audit` | `output_dir` | 稽核 JSONL 輸出目錄（預設 `data/audit/`） |
 
@@ -251,7 +266,7 @@ note, status, ttl_days, last_hit_time, hit_count
 | `action` | 逗號分隔的 action；留空 = 任意 |
 | `source_ip` / `destination_ip` | 支援單一 IP、CIDR、逗號分隔；留空 = 任意 |
 | `note` | 備註說明（出現在告警 log） |
-| `status` | `confirmed`（穩定）/ `testing`（觀察中） |
+| `status` | `confirmed`（穩定）/ `monitoring`（觀察中） |
 | `ttl_days` | TTL 天數；空白 = 使用 config 預設值；`-1` = **永不過期** |
 | `last_hit_time` | 最後命中時間（程式自動維護，ISO 8601） |
 | `hit_count` | 累計命中次數（程式自動維護） |
@@ -328,7 +343,7 @@ CSV 欄位：`timestamp, stage, verdict, confidence, reasoning, recommended_acti
 pytest tests/ -v
 ```
 
-目前涵蓋 **47 個測試案例**：
+目前涵蓋 **56 個測試案例**：
 
 | 測試類別 | 案例數 | 涵蓋範圍 |
 |---------|--------|----------|
@@ -341,6 +356,8 @@ pytest tests/ -v
 | `TestWhitelistManagerCIDR` | 4 | CIDR 邊界、混合 IP+CIDR |
 | `TestRateLimiter` | 5 | 去重邏輯、triage 整合 |
 | `TestSafeAudit` | 4 | JSONL 寫入、欄位驗證、CSV 匯出 |
+| `TestCustomListBackend` | 7 | IP 命中、CIDR、miss、注解跳過、reload、hit_count |
+| `TestPanThreatNormalizer` | 3 | 欄位對應（alert_signature / severity）、未知欄位保留 |
 
 ---
 
@@ -355,6 +372,9 @@ pytest tests/ -v
 | `GET` | `/edl/pending` | 列出待審 EDL 條目 |
 | `PATCH` | `/edl/entry/{value}` | 修改 per-entry TTL（`{"ttl_days": -1}` = 永不過期） |
 | `POST` | `/whitelist/reload` | 熱重載白名單 CSV |
+| `GET` | `/whitelist/stats` | 白名單各規則 hit_count 統計 |
+| `POST` | `/blacklist/reload` | 熱重載黑名單檔案（需 `enabled: true`） |
+| `GET` | `/blacklist/stats` | 黑名單統計（筆數、命中數、最後載入時間） |
 | `GET` | `/audit/export` | 匯出稽核紀錄（`?date=YYYY-MM-DD&format=jsonl\|csv`） |
 | `GET` | `/health` | 服務健康檢查 |
 
@@ -366,5 +386,5 @@ pytest tests/ -v
 |------|------|------|
 | Phase 1 | ✅ 完成 | Webhook 接收、enrichment、BackgroundTask、固定規則研判、Email 通知、Rate Limiter |
 | Phase 2 | ✅ 完成 | WhitelistManager（TTL/hit tracking/hot-reload）、SafeAudit JSONL、EDL GlobalProtect 格式、ExpiryPolicy |
-| Phase 3 | 🔲 規劃中 | Gate 2 可插拔黑名單（AbuseIPDB / FireHOL / custom）；自動封鎖黑名單命中 IP |
-| Phase 4 | 🔲 規劃中 | `/learn/false_positive` AI 規則生成；`testing` → `confirmed` 升級流程 |
+| Phase 3 | ✅ 完成 | Gate 2 可插拔黑名單（BlacklistBackend + CustomListBackend）；`/blacklist/stats`、`/whitelist/stats`；PAN log 欄位正規化；Dockerfile VOLUME + HEALTHCHECK |
+| Phase 4 | 🔲 規劃中 | `/learn/false_positive` AI 規則生成；`monitoring` → `confirmed` 升級流程；趨勢週報 |
