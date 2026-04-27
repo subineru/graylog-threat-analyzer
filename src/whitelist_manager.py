@@ -42,7 +42,7 @@ class FPRule:
     source_networks: list         # list[IPv4Network | str]
     destination_networks: list
     note: str
-    status: str                   # confirmed | testing
+    status: str                   # confirmed | monitoring
     expiry: ExpiryPolicy          # ttl_days + last_activity (= last_hit_time)
     hit_count: int = field(default=0)
 
