@@ -291,6 +291,26 @@ async def edl_update_ttl(
     return {"status": "updated", "value": value, "ttl_days": ttl_days}
 
 
+@app.delete("/edl/entry/{value:path}")
+async def edl_remove_entry(value: str, request: Request):
+    """
+    立即移除已確認的 EDL 條目（誤加時使用）。
+    EDL 檔案即時更新，PA 下次拉取時生效。
+    """
+    edl_mgr = request.app.state.edl
+    ok = edl_mgr.remove_entry(value)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"EDL entry '{value}' not found")
+    return {"status": "removed", "value": value}
+
+
+@app.get("/edl/entries")
+async def edl_list_entries(request: Request):
+    """列出所有已確認的 EDL 條目（管理用）。"""
+    edl_mgr = request.app.state.edl
+    return {"entries": edl_mgr.list_entries()}
+
+
 # --- Whitelist endpoints ---
 
 @app.get("/whitelist/approve/{token}")
@@ -308,6 +328,18 @@ async def whitelist_reload(request: Request):
     """熱重載白名單 CSV（手動編輯 known_fp.csv 後呼叫此 endpoint 生效）。"""
     await request.app.state.triage.whitelist.reload()
     return {"status": "reloaded"}
+
+
+@app.delete("/whitelist/rule/{signature_id}")
+async def whitelist_remove_rule(signature_id: str, request: Request):
+    """
+    移除指定 signature_id 的白名單規則（即時生效，同步寫回 CSV）。
+    """
+    wl = request.app.state.triage.whitelist
+    ok = await wl.remove_rule(signature_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Whitelist rule '{signature_id}' not found")
+    return {"status": "removed", "signature_id": signature_id}
 
 
 @app.get("/whitelist/stats")

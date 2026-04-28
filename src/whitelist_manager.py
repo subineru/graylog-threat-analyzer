@@ -243,6 +243,17 @@ class WhitelistManager:
         }
         return token
 
+    async def remove_rule(self, signature_id: str) -> bool:
+        """Remove all rules matching signature_id, write back CSV immediately."""
+        async with self._lock:
+            before = len(self._rules)
+            self._rules = [r for r in self._rules if r.signature_id != signature_id]
+            if len(self._rules) == before:
+                return False
+        await self.write_back()
+        logger.info(f"Whitelist rule removed: {signature_id}")
+        return True
+
     async def approve_rule(self, token: str) -> tuple[bool, str]:
         """Consume approval token and append new rule to CSV + reload."""
         rule_data = self._pending_rules.pop(token, None)
