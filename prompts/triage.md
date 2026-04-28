@@ -47,6 +47,13 @@
 4. 如果同一來源 IP 在短時間內觸發多種不同 signature，提高異常可能性。
 5. severity 為 informational 且 action 為 alert 的事件，大多為偵測型規則，傾向 normal 或 false_positive。
 
+## recommended_action 語意
+
+- **block**：確認為外部威脅或明確惡意行為，建議加入 EDL 封鎖清單。
+- **investigate**：行為可疑但無法確認，需人工調查（如未知內部 IP 行為異常、來源不明）。
+- **monitor**：觸發次數偏高或有輕微異常特徵，但暫不需立即行動，持續觀察。
+- **suppress**：正常行為、已防禦或誤判，靜默抑制即可，不需通知。
+
 ## 回應格式
 
 請嚴格以下列 JSON 格式回應，不要包含任何其他文字：
@@ -56,7 +63,7 @@
   "verdict": "normal | false_positive | anomalous",
   "confidence": "high | medium | low",
   "reasoning": "一段 50-100 字的中文說明",
-  "recommended_action": "suppress | monitor | block",
+  "recommended_action": "suppress | monitor | investigate | block",
   "edl_entry": null 或 "要阻擋的 IP/URL"
 }
 ```

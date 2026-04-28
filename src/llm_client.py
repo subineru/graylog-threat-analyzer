@@ -20,7 +20,7 @@ class TriageVerdict(BaseModel):
     verdict: str  # normal | false_positive | anomalous | duplicate
     confidence: str  # high | medium | low
     reasoning: str
-    recommended_action: str  # suppress | monitor | block
+    recommended_action: str  # suppress | monitor | investigate | block
     edl_entry: str | None = None
     stage: str | None = None  # rate_limit | whitelist | edl_active | blacklist | gate3_rule | gate3_llm
 
@@ -85,7 +85,7 @@ class LLMClient:
                 verdict="normal",
                 confidence="medium",
                 reasoning="Severity 為 informational，PA 僅 alert 未阻擋，大多為正常偵測。",
-                recommended_action="monitor",
+                recommended_action="suppress",
                 stage="gate3_rule",
             )
 
