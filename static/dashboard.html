@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graylog Threat Analyzer — Dashboard</title>
+<style>
+  /* ── Reset & Base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --navy:      #1B3A6B;
+    --blue:      #2E74B5;
+    --accent:    #4472C4;
+    --light-bg:  #BDD7EE;
+    --pale-bg:   #DEEAF1;
+    --white:     #FFFFFF;
+    --dark:      #1A1A2E;
+    --gray:      #595959;
+    --bg:        #F0F4FA;
+    --red:       #C00000;
+    --orange:    #ED7D31;
+    --green:     #375623;
+    --green-lt:  #E2EFDA;
+    --red-lt:    #FCE4EC;
+    --orange-lt: #FFF3E0;
+    --blue-lt:   #E3F2FD;
+    --border:    #C5D5E8;
+    --shadow:    0 2px 8px rgba(27,58,107,.12);
+    --radius:    8px;
+  }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg);
+         color: var(--dark); font-size: 14px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Layout ── */
+  header {
+    background: var(--navy);
+    color: var(--white);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 28px; height: 56px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.25);
+    position: sticky; top: 0; z-index: 100;
+  }
+  header .brand { font-size: 17px; font-weight: 700; letter-spacing: .3px; }
+  header .brand span { color: var(--light-bg); font-weight: 400; margin-left: 6px; font-size: 13px; }
+  nav a {
+    color: var(--light-bg); font-size: 13px; margin-left: 20px;
+    padding: 4px 10px; border-radius: 4px; transition: background .15s;
+  }
+  nav a:hover, nav a.active { background: rgba(255,255,255,.15); color: #fff; text-decoration: none; }
+
+  main { max-width: 1280px; margin: 0 auto; padding: 24px 20px 48px; }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 18px; margin-bottom: 22px;
+    box-shadow: var(--shadow);
+  }
+  .toolbar label { font-size: 13px; color: var(--gray); font-weight: 600; }
+  .preset-btn {
+    background: var(--pale-bg); border: 1px solid var(--border); border-radius: 5px;
+    color: var(--navy); font-size: 12px; font-weight: 600;
+    padding: 5px 12px; cursor: pointer; transition: background .15s, border-color .15s;
+  }
+  .preset-btn:hover, .preset-btn.active {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  .date-input {
+    border: 1px solid var(--border); border-radius: 5px;
+    padding: 5px 10px; font-size: 13px; color: var(--dark);
+    background: var(--white); outline: none;
+  }
+  .date-input:focus { border-color: var(--accent); }
+  .sep { color: var(--gray); font-size: 13px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: none; border-radius: 5px; padding: 6px 16px;
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: filter .15s;
+  }
+  .btn:hover { filter: brightness(.9); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-export  { background: var(--navy);  color: #fff; margin-left: auto; }
+  .btn-danger  { background: var(--red);   color: #fff; }
+  .btn-sm      { padding: 3px 10px; font-size: 12px; }
+  #refresh-info { font-size: 12px; color: var(--gray); margin-left: 4px; }
+
+  /* ── KPI Cards ── */
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 22px; }
+  @media (max-width: 900px) { .kpi-row { grid-template-columns: repeat(2,1fr); } }
+  .kpi {
+    background: var(--white); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 20px 18px 16px;
+    box-shadow: var(--shadow); border-top: 4px solid var(--accent);
+    position: relative;
+  }
+  .kpi.red    { border-top-color: var(--red); }
+  .kpi.green  { border-top-color: #70AD47; }
+  .kpi.orange { border-top-color: var(--orange); }
+  .kpi-value { font-size: 38px; font-weight: 700; line-height: 1; color: var(--navy); }
+  .kpi.red    .kpi-value { color: var(--red); }
+  .kpi.green  .kpi-value { color: #375623; }
+  .kpi.orange .kpi-value { color: #BF6000; }
+  .kpi-label { font-size: 12px; font-weight: 700; color: var(--gray);
+               text-transform: uppercase; letter-spacing: .6px; margin-top: 8px; }
+  .kpi-sub   { font-size: 11px; color: var(--gray); margin-top: 4px; }
+
+  /* ── Pending alert banner ── */
+  .pending-banner {
+    display: none; background: #FFF8E1; border: 1px solid #FFD54F;
+    border-left: 4px solid var(--orange); border-radius: var(--radius);
+    padding: 12px 18px; margin-bottom: 18px;
+    font-size: 13px; color: #5D4037; align-items: center; gap: 12px;
+  }
+  .pending-banner.show { display: flex; }
+  .pending-banner strong { color: var(--red); }
+
+  /* ── Grid panels ── */
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 22px; }
+  @media (max-width: 900px) { .panels { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--white); border-radius: var(--radius);
+    border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .panel-head {
+    background: var(--navy); color: #fff; padding: 10px 16px;
+    font-size: 13px; font-weight: 700; display: flex; align-items: center;
+    justify-content: space-between;
+  }
+  .panel-body { padding: 16px; }
+
+  /* ── Tables ── */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th {
+    background: var(--pale-bg); color: var(--navy); font-weight: 700;
+    padding: 8px 10px; text-align: left; border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  .tbl td { padding: 7px 10px; border-bottom: 1px solid #EEF2F8; vertical-align: top; }
+  .tbl tr:last-child td { border-bottom: none; }
+  .tbl tr:hover td { background: var(--pale-bg); }
+  .tbl .mono { font-family: 'Consolas', monospace; font-size: 12px; }
+  .empty-row td { color: var(--gray); text-align: center; padding: 24px; font-style: italic; }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-block; border-radius: 4px; padding: 2px 8px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+  }
+  .badge-block       { background: var(--red-lt);    color: var(--red); }
+  .badge-monitor     { background: var(--orange-lt);  color: #BF6000; }
+  .badge-investigate { background: #FFF3E0;           color: #E65100; }
+  .badge-suppress    { background: var(--green-lt);   color: var(--green); }
+  .badge-duplicate   { background: #ECEFF1;           color: #546E7A; }
+  .badge-anomalous   { background: var(--red-lt);     color: var(--red); }
+  .badge-normal      { background: var(--green-lt);   color: var(--green); }
+  .badge-false_positive { background: var(--blue-lt); color: var(--blue); }
+
+  /* ── Bar chart (CSS only) ── */
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .bar-label { width: 100px; font-size: 12px; font-weight: 600; text-align: right;
+               color: var(--gray); flex-shrink: 0; }
+  .bar-track { flex: 1; height: 18px; background: var(--pale-bg); border-radius: 3px; overflow: hidden; }
+  .bar-fill  { height: 100%; border-radius: 3px; transition: width .5s ease; }
+  .bar-count { width: 50px; font-size: 12px; color: var(--gray); text-align: right; }
+  .bar-block       .bar-fill { background: var(--red); }
+  .bar-investigate .bar-fill { background: var(--orange); }
+  .bar-monitor     .bar-fill { background: #FFC107; }
+  .bar-suppress    .bar-fill { background: #70AD47; }
+
+  /* ── Daily trend mini-bars ── */
+  .trend-grid { display: grid; grid-template-columns: auto 1fr auto;
+                gap: 4px 8px; align-items: center; font-size: 12px; }
+  .trend-date { color: var(--gray); white-space: nowrap; }
+  .trend-bar  { height: 14px; background: var(--accent); border-radius: 2px;
+                min-width: 2px; transition: width .4s ease; }
+  .trend-num  { color: var(--dark); font-weight: 600; text-align: right; }
+
+  /* ── EDL / WL management panels ── */
+  .full-panel {
+    background: var(--white); border-radius: var(--radius);
+    border: 1px solid var(--border); box-shadow: var(--shadow);
+    overflow: hidden; margin-bottom: 18px;
+  }
+
+  /* ── Spinner ── */
+  .spinner { display: none; width: 18px; height: 18px; border: 2px solid var(--pale-bg);
+             border-top-color: var(--accent); border-radius: 50%;
+             animation: spin .7s linear infinite; }
+  .spinner.show { display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+    background: var(--navy); color: #fff; border-radius: 6px;
+    padding: 10px 18px; font-size: 13px; box-shadow: var(--shadow);
+    opacity: 0; transition: opacity .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  #toast.error { background: var(--red); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    Graylog Threat Analyzer
+    <span>Security Operations Dashboard</span>
+  </div>
+  <nav>
+    <a href="/dashboard" class="active">Dashboard</a>
+    <a href="/docs" target="_blank">API Docs</a>
+    <a href="/health">Health</a>
+  </nav>
+</header>
+
+<main>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <label>Period:</label>
+    <button class="preset-btn" data-days="0">Today</button>
+    <button class="preset-btn" data-days="6">7 Days</button>
+    <button class="preset-btn" data-days="29">30 Days</button>
+    <button class="preset-btn" data-days="89">90 Days</button>
+    <span class="sep">|</span>
+    <input type="date" id="date-start" class="date-input">
+    <span class="sep">～</span>
+    <input type="date" id="date-end" class="date-input">
+    <button class="btn btn-primary" id="btn-load">
+      <span id="spinner" class="spinner"></span> Load
+    </button>
+    <span id="refresh-info"></span>
+    <button class="btn btn-export" id="btn-pptx">⬇ Export PPT</button>
+  </div>
+
+  <!-- Pending approvals banner -->
+  <div class="pending-banner" id="pending-banner">
+    <span>⚠️</span>
+    <span id="pending-text"></span>
+    <a href="#section-edl">View EDL pending ↓</a>
+    <a href="#section-wl">View Whitelist pending ↓</a>
+  </div>
+
+  <!-- KPI Row -->
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-value" id="kpi-total">—</div>
+      <div class="kpi-label">Total Events</div>
+      <div class="kpi-sub">Events processed in period</div>
+    </div>
+    <div class="kpi red">
+      <div class="kpi-value" id="kpi-block">—</div>
+      <div class="kpi-label">Blocked</div>
+      <div class="kpi-sub">Confirmed threats (EDL candidates)</div>
+    </div>
+    <div class="kpi green">
+      <div class="kpi-value" id="kpi-sup">—</div>
+      <div class="kpi-label">Suppression Rate</div>
+      <div class="kpi-sub">Auto-handled without alert</div>
+    </div>
+    <div class="kpi orange">
+      <div class="kpi-value" id="kpi-pending">—</div>
+      <div class="kpi-label">Pending Review</div>
+      <div class="kpi-sub">Monitor + Investigate items</div>
+    </div>
+  </div>
+
+  <!-- Distribution + Daily Trend -->
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-head">Action Distribution</div>
+      <div class="panel-body" id="chart-actions"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">Daily Trend</div>
+      <div class="panel-body" id="chart-daily"></div>
+    </div>
+  </div>
+
+  <!-- Top signatures + pending events -->
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-head">Top 10 Threat Signatures</div>
+      <div class="panel-body">
+        <table class="tbl" id="tbl-sigs">
+          <thead><tr><th>#</th><th>Signature</th><th>Count</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">Pending Review (Monitor / Investigate)</div>
+      <div class="panel-body">
+        <table class="tbl" id="tbl-pending">
+          <thead><tr><th>Time</th><th>Src IP</th><th>Action</th><th>Signature</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blocked events -->
+  <div class="full-panel">
+    <div class="panel-head">Blocked Events (EDL Candidates)</div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="tbl-blocked">
+        <thead><tr><th>Time</th><th>Src IP</th><th>Dst IP</th><th>Signature</th><th>Reasoning</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- EDL Management -->
+  <div class="full-panel" id="section-edl">
+    <div class="panel-head">
+      EDL — Active Block List
+      <button class="btn btn-primary btn-sm" onclick="loadEdl()">Refresh</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="tbl-edl">
+        <thead><tr><th>Value</th><th>Type</th><th>Added</th><th>Expires</th><th>TTL Days</th><th>Action</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- EDL Pending -->
+  <div class="full-panel">
+    <div class="panel-head">
+      EDL — Pending Approval
+      <button class="btn btn-primary btn-sm" onclick="loadEdlPending()">Refresh</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="tbl-edl-pending">
+        <thead><tr><th>Value</th><th>Token</th><th>Source Event</th><th>Action</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Whitelist Management -->
+  <div class="full-panel" id="section-wl">
+    <div class="panel-head">
+      Whitelist Rules
+      <button class="btn btn-primary btn-sm" onclick="loadWhitelist()">Refresh</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="tbl-wl">
+        <thead><tr><th>Signature ID</th><th>Name</th><th>Status</th><th>Hit Count</th><th>Last Hit</th><th>Action</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function showToast(msg, isError = false) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'show' + (isError ? ' error' : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.className = '', 3000);
+}
+
+function badge(cls, label) {
+  return `<span class="badge badge-${cls}">${label}</span>`;
+}
+
+function setTbody(tblId, rows) {
+  const tbody = document.querySelector(`#${tblId} tbody`);
+  tbody.innerHTML = rows.length
+    ? rows.join('')
+    : `<tr class="empty-row"><td colspan="99">No data for this period</td></tr>`;
+}
+
+// ── Date range ────────────────────────────────────────────────────────────────
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+function initDates() {
+  $('date-start').value = today();
+  $('date-end').value   = today();
+}
+
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const days = parseInt(btn.dataset.days);
+    $('date-start').value = daysAgo(days);
+    $('date-end').value   = today();
+    loadSummary();
+  });
+});
+
+// ── Summary / KPI ─────────────────────────────────────────────────────────────
+async function loadSummary() {
+  const s = $('date-start').value;
+  const e = $('date-end').value;
+  if (!s || !e) return;
+
+  $('spinner').classList.add('show');
+  $('refresh-info').textContent = '';
+
+  try {
+    const r = await fetch(`/report/summary?start=${s}&end=${e}`);
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    renderSummary(d);
+    $('refresh-info').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  } catch(err) {
+    showToast('Failed to load summary: ' + err.message, true);
+  } finally {
+    $('spinner').classList.remove('show');
+  }
+}
+
+function renderSummary(d) {
+  const total   = d.total_events || 0;
+  const ac      = d.action_counts || {};
+  const blocked = ac.block || 0;
+  const pending = (ac.monitor || 0) + (ac.investigate || 0);
+  const supRate = d.suppression_rate || 0;
+
+  $('kpi-total').textContent   = total.toLocaleString();
+  $('kpi-block').textContent   = blocked.toLocaleString();
+  $('kpi-sup').textContent     = supRate + '%';
+  $('kpi-pending').textContent = pending.toLocaleString();
+
+  // Pending banner
+  const banner = $('pending-banner');
+  if (pending > 0) {
+    $('pending-text').innerHTML =
+      `<strong>${pending} items</strong> require analyst review (monitor/investigate).`;
+    banner.classList.add('show');
+  } else {
+    banner.classList.remove('show');
+  }
+
+  // Action distribution bars
+  const actions = ['block', 'investigate', 'monitor', 'suppress'];
+  const labels  = { block:'Block', investigate:'Investigate', monitor:'Monitor', suppress:'Suppress' };
+  const maxAc   = Math.max(...actions.map(a => ac[a] || 0), 1);
+  $('chart-actions').innerHTML = actions.map(a => {
+    const cnt = ac[a] || 0;
+    const pct = Math.round(cnt / maxAc * 100);
+    const pctTotal = total > 0 ? (cnt / total * 100).toFixed(1) : 0;
+    return `<div class="bar-row bar-${a}">
+      <div class="bar-label">${labels[a]}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <div class="bar-count">${cnt.toLocaleString()} <span style="color:#aaa;font-size:10px">(${pctTotal}%)</span></div>
+    </div>`;
+  }).join('');
+
+  // Daily trend
+  const daily  = d.daily_counts || {};
+  const days   = Object.keys(daily).sort();
+  const maxDay = Math.max(...Object.values(daily), 1);
+  if (days.length === 0) {
+    $('chart-daily').innerHTML = '<p style="color:var(--gray);font-size:13px;padding:8px">No daily data.</p>';
+  } else {
+    const rows = days.map(day => {
+      const cnt = daily[day];
+      const w   = Math.max(Math.round(cnt / maxDay * 100), 1);
+      return `<div class="trend-date">${day}</div>
+              <div><div class="trend-bar" style="width:${w}%"></div></div>
+              <div class="trend-num">${cnt}</div>`;
+    }).join('');
+    $('chart-daily').innerHTML = `<div class="trend-grid">${rows}</div>`;
+  }
+
+  // Top signatures
+  const sigs = d.top_signatures || [];
+  setTbody('tbl-sigs', sigs.map(([name, cnt], i) => {
+    const pct = total > 0 ? (cnt / total * 100).toFixed(1) : 0;
+    return `<tr>
+      <td style="color:var(--accent);font-weight:700">#${i+1}</td>
+      <td>${esc(name)}</td>
+      <td>${cnt} <small style="color:var(--gray)">(${pct}%)</small></td>
+    </tr>`;
+  }));
+
+  // Pending events
+  const pEvents = d.pending_events || [];
+  setTbody('tbl-pending', pEvents.slice(0,20).map(ev => `<tr>
+    <td class="mono">${esc(ev.timestamp||'').slice(0,16)}</td>
+    <td class="mono">${esc(ev.src_ip||'')}</td>
+    <td>${badge(ev.action||'monitor', ev.action||'monitor')}</td>
+    <td>${esc((ev.signature||'').slice(0,60))}</td>
+  </tr>`));
+
+  // Blocked events
+  const bEvents = d.block_events || [];
+  setTbody('tbl-blocked', bEvents.slice(0,20).map(ev => `<tr>
+    <td class="mono">${esc(ev.timestamp||'').slice(0,16)}</td>
+    <td class="mono">${esc(ev.src_ip||'')}</td>
+    <td class="mono">${esc(ev.dst_ip||'')}</td>
+    <td>${esc((ev.signature||'').slice(0,60))}</td>
+    <td style="color:var(--gray);font-size:12px">${esc((ev.reasoning||'').slice(0,100))}</td>
+  </tr>`));
+}
+
+// ── EDL Management ────────────────────────────────────────────────────────────
+async function loadEdl() {
+  try {
+    const r = await fetch('/edl/entries');
+    const d = await r.json();
+    const entries = d.entries || [];
+    setTbody('tbl-edl', entries.map(e => `<tr>
+      <td class="mono"><strong>${esc(e.value)}</strong></td>
+      <td>${esc(e.entry_type||'')}</td>
+      <td class="mono">${esc((e.added_at||'').slice(0,16))}</td>
+      <td class="mono">${esc((e.expires_at||'Never').slice(0,10))}</td>
+      <td>${esc(e.ttl_days)}</td>
+      <td>
+        <button class="btn btn-danger btn-sm" onclick="removeEdl('${esc(e.value)}')">Remove</button>
+      </td>
+    </tr>`));
+  } catch(err) {
+    showToast('Failed to load EDL: ' + err.message, true);
+  }
+}
+
+async function removeEdl(value) {
+  if (!confirm(`Remove "${value}" from EDL? PA will stop blocking this IP on next pull.`)) return;
+  try {
+    const r = await fetch('/edl/entry/' + encodeURIComponent(value), { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json()).detail);
+    showToast(`Removed from EDL: ${value}`);
+    loadEdl();
+  } catch(err) {
+    showToast('Error: ' + err.message, true);
+  }
+}
+
+async function loadEdlPending() {
+  try {
+    const r = await fetch('/edl/pending');
+    const d = await r.json();
+    const entries = d.pending || [];
+    setTbody('tbl-edl-pending', entries.map(e => `<tr>
+      <td class="mono"><strong>${esc(e.value)}</strong></td>
+      <td class="mono" style="font-size:11px;color:var(--gray)">${esc(e.token||'').slice(0,12)}…</td>
+      <td style="font-size:12px;color:var(--gray)">${esc(JSON.stringify(e.source_event||{}).slice(0,80))}</td>
+      <td>
+        <a class="btn btn-primary btn-sm" href="/edl/approve/${esc(e.token)}">Approve</a>
+        <a class="btn btn-sm" style="background:var(--gray);color:#fff;margin-left:4px"
+           href="/edl/reject/${esc(e.token)}">Reject</a>
+      </td>
+    </tr>`));
+  } catch(err) {
+    showToast('Failed to load pending EDL: ' + err.message, true);
+  }
+}
+
+// ── Whitelist Management ──────────────────────────────────────────────────────
+async function loadWhitelist() {
+  try {
+    const r = await fetch('/whitelist/stats');
+    const d = await r.json();
+    const rules = d.rules || [];
+    rules.sort((a,b) => (b.hit_count||0) - (a.hit_count||0));
+    setTbody('tbl-wl', rules.map(rule => `<tr>
+      <td class="mono">${esc(rule.signature_id)}</td>
+      <td>${esc(rule.signature_name||'')}</td>
+      <td><span class="badge" style="background:${rule.status==='confirmed'?'var(--green-lt)':'var(--orange-lt)'};
+           color:${rule.status==='confirmed'?'var(--green)':'#BF6000'}">${esc(rule.status)}</span></td>
+      <td style="font-weight:${rule.hit_count>0?'700':'400'}">${rule.hit_count||0}</td>
+      <td class="mono">${esc((rule.last_hit_time||'—').slice(0,16))}</td>
+      <td>
+        <button class="btn btn-danger btn-sm"
+          onclick="removeWhitelistRule('${esc(rule.signature_id)}')">Remove</button>
+      </td>
+    </tr>`));
+  } catch(err) {
+    showToast('Failed to load whitelist: ' + err.message, true);
+  }
+}
+
+async function removeWhitelistRule(sigId) {
+  if (!confirm(`Remove whitelist rule "${sigId}"? Future matching events will be re-evaluated.`)) return;
+  try {
+    const r = await fetch('/whitelist/rule/' + encodeURIComponent(sigId), { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json()).detail);
+    showToast(`Whitelist rule removed: ${sigId}`);
+    loadWhitelist();
+  } catch(err) {
+    showToast('Error: ' + err.message, true);
+  }
+}
+
+// ── Export PPT ────────────────────────────────────────────────────────────────
+$('btn-pptx').addEventListener('click', () => {
+  const s = $('date-start').value;
+  const e = $('date-end').value;
+  if (!s || !e) { showToast('Please select a date range first.', true); return; }
+  window.location.href = `/report/pptx?start=${s}&end=${e}`;
+  showToast('Generating PowerPoint report…');
+});
+
+// ── Load button ───────────────────────────────────────────────────────────────
+$('btn-load').addEventListener('click', loadSummary);
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+initDates();
+
+// Set "Today" as default active preset
+document.querySelector('.preset-btn[data-days="0"]').classList.add('active');
+
+// Load all panels on startup
+loadSummary();
+loadEdl();
+loadEdlPending();
+loadWhitelist();
+
+// Auto-refresh every 60 seconds
+setInterval(() => {
+  loadSummary();
+  loadEdl();
+  loadEdlPending();
+  loadWhitelist();
+}, 60_000);
+</script>
+</body>
+</html>
