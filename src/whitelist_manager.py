@@ -229,6 +229,8 @@ class WhitelistManager:
         note: str = "",
     ) -> str:
         """Register a pending whitelist rule and return a one-time approval token."""
+        # Extract numeric ID from "Name(ID)" format if needed
+        sig_id = self._extract_sig_id(sig_id) if sig_id else sig_id
         token = str(uuid.uuid4())
         self._pending_rules[token] = {
             "sig_id": sig_id,
