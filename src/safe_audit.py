@@ -92,3 +92,87 @@ class SafeAudit:
                 })
 
         return output.getvalue()
+
+    def aggregate(self, start_date: str, end_date: str) -> dict:
+        """
+        Aggregate audit records across a date range (inclusive).
+        Returns structured stats dict consumed by /report/summary and report_generator.
+        """
+        from collections import Counter, defaultdict
+        from datetime import date as date_type, timedelta
+
+        start = date_type.fromisoformat(start_date)
+        end = date_type.fromisoformat(end_date)
+
+        records: list[dict] = []
+        current = start
+        while current <= end:
+            path = self._output_dir / f"{current}.jsonl"
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            records.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+            current += timedelta(days=1)
+
+        return self._compute_stats(records, start_date, end_date)
+
+    def _compute_stats(self, records: list[dict], start_date: str, end_date: str) -> dict:
+        from collections import Counter, defaultdict
+
+        total = len(records)
+        action_counts: Counter = Counter()
+        verdict_counts: Counter = Counter()
+        signature_counts: Counter = Counter()
+        daily_counts: dict = defaultdict(int)
+        block_events: list[dict] = []
+        pending_events: list[dict] = []
+
+        for rec in records:
+            v = rec.get("verdict", {})
+            es = rec.get("event_summary", {})
+            action = v.get("recommended_action", "suppress")
+            verdict = v.get("verdict", "unknown")
+
+            action_counts[action] += 1
+            verdict_counts[verdict] += 1
+
+            sig = es.get("signature_name") or es.get("signature_id", "—")
+            signature_counts[sig] += 1
+
+            ts = rec.get("timestamp", "")
+            if ts:
+                daily_counts[ts[:10]] += 1
+
+            event_row = {
+                "timestamp": ts[:19].replace("T", " ") if ts else "",
+                "src_ip": es.get("source_ip", ""),
+                "dst_ip": es.get("destination_ip", ""),
+                "signature": sig,
+                "action": action,
+                "reasoning": v.get("reasoning", ""),
+            }
+            if action == "block":
+                block_events.append(event_row)
+            elif action in ("monitor", "investigate"):
+                pending_events.append(event_row)
+
+        suppressed = action_counts.get("suppress", 0)
+        suppression_rate = round(suppressed / total * 100, 1) if total > 0 else 0.0
+
+        return {
+            "period": {"start": start_date, "end": end_date},
+            "total_events": total,
+            "suppression_rate": suppression_rate,
+            "action_counts": dict(action_counts),
+            "verdict_counts": dict(verdict_counts),
+            "top_signatures": signature_counts.most_common(10),
+            "daily_counts": dict(sorted(daily_counts.items())),
+            "block_events": block_events[:50],
+            "pending_events": pending_events[:50],
+        }

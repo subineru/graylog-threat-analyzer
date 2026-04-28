@@ -10,12 +10,14 @@ from pathlib import Path
 
 import yaml
 from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from .edl_manager import EDLManager
 from .enrichment import EnrichmentService
 from .notifier import EmailNotifier
+from .report_generator import generate_pptx
 from .safe_audit import SafeAudit
 from .triage_engine import TriageEngine
 
@@ -135,6 +137,19 @@ app = FastAPI(
     version="0.3.0",
     lifespan=lifespan,
 )
+
+_STATIC_DIR = Path(__file__).parent.parent / "static"
+if _STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard():
+    """Serve the management dashboard."""
+    html = _STATIC_DIR / "dashboard.html"
+    if not html.exists():
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    return FileResponse(str(html))
 
 
 @app.post("/webhook/graylog")
@@ -291,6 +306,26 @@ async def edl_update_ttl(
     return {"status": "updated", "value": value, "ttl_days": ttl_days}
 
 
+@app.delete("/edl/entry/{value:path}")
+async def edl_remove_entry(value: str, request: Request):
+    """
+    立即移除已確認的 EDL 條目（誤加時使用）。
+    EDL 檔案即時更新，PA 下次拉取時生效。
+    """
+    edl_mgr = request.app.state.edl
+    ok = edl_mgr.remove_entry(value)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"EDL entry '{value}' not found")
+    return {"status": "removed", "value": value}
+
+
+@app.get("/edl/entries")
+async def edl_list_entries(request: Request):
+    """列出所有已確認的 EDL 條目（管理用）。"""
+    edl_mgr = request.app.state.edl
+    return {"entries": edl_mgr.list_entries()}
+
+
 # --- Whitelist endpoints ---
 
 @app.get("/whitelist/approve/{token}")
@@ -308,6 +343,18 @@ async def whitelist_reload(request: Request):
     """熱重載白名單 CSV（手動編輯 known_fp.csv 後呼叫此 endpoint 生效）。"""
     await request.app.state.triage.whitelist.reload()
     return {"status": "reloaded"}
+
+
+@app.delete("/whitelist/rule/{signature_id}")
+async def whitelist_remove_rule(signature_id: str, request: Request):
+    """
+    移除指定 signature_id 的白名單規則（即時生效，同步寫回 CSV）。
+    """
+    wl = request.app.state.triage.whitelist
+    ok = await wl.remove_rule(signature_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Whitelist rule '{signature_id}' not found")
+    return {"status": "removed", "signature_id": signature_id}
 
 
 @app.get("/whitelist/stats")
@@ -417,6 +464,56 @@ async def health_check(request: Request):
         "whitelist_rules": wl_count,
         "blacklist": bl_info,
     }
+
+
+# --- Report endpoints ---
+
+def _parse_date_range(
+    start: str | None, end: str | None
+) -> tuple[str, str]:
+    """Return (start_date, end_date) strings, defaulting to today."""
+    today = str(date.today())
+    s = start or today
+    e = end or today
+    try:
+        date.fromisoformat(s)
+        date.fromisoformat(e)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid date format: {exc}")
+    if s > e:
+        raise HTTPException(status_code=422, detail="start must be ≤ end")
+    return s, e
+
+
+@app.get("/report/summary")
+async def report_summary(
+    request: Request,
+    start: str | None = Query(default=None, description="YYYY-MM-DD"),
+    end:   str | None = Query(default=None, description="YYYY-MM-DD"),
+):
+    """Aggregate audit stats across a date range (JSON)."""
+    s, e = _parse_date_range(start, end)
+    safe_audit: SafeAudit = request.app.state.safe_audit
+    return safe_audit.aggregate(s, e)
+
+
+@app.get("/report/pptx")
+async def report_pptx(
+    request: Request,
+    start: str | None = Query(default=None, description="YYYY-MM-DD"),
+    end:   str | None = Query(default=None, description="YYYY-MM-DD"),
+):
+    """Generate and download a PowerPoint report for the given date range."""
+    s, e = _parse_date_range(start, end)
+    safe_audit: SafeAudit = request.app.state.safe_audit
+    stats = safe_audit.aggregate(s, e)
+    pptx_bytes = generate_pptx(stats)
+    filename = f"threat_report_{s}_{e}.pptx"
+    return Response(
+        content=pptx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 if __name__ == "__main__":
