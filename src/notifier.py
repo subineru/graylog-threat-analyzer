@@ -30,13 +30,14 @@ class EmailNotifier:
         enriched_context: dict,
         verdict,
         edl_approve_url: str | None = None,
+        whitelist_approve_url: str | None = None,
     ) -> bool:
         """寄送告警 email"""
         if not self.recipients:
             logger.warning("No email recipients configured, skipping notification.")
             return False
 
-        body = self._format_email_body(enriched_context, verdict, edl_approve_url)
+        body = self._format_email_body(enriched_context, verdict, edl_approve_url, whitelist_approve_url)
 
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -62,7 +63,11 @@ class EmailNotifier:
             return False
 
     def _format_email_body(
-        self, enriched: dict, verdict, edl_approve_url: str | None = None
+        self,
+        enriched: dict,
+        verdict,
+        edl_approve_url: str | None = None,
+        whitelist_approve_url: str | None = None,
     ) -> str:
         """產生 HTML email 內容"""
         summary = enriched.get("event_summary", {})
@@ -94,6 +99,19 @@ class EmailNotifier:
         else:
             edl_section = ""
 
+        if whitelist_approve_url:
+            wl_section = f"""
+                <div style="margin: 16px 0; padding: 14px; background: #fff3e0; border: 1px solid #ff9800; border-radius: 6px;">
+                    <p style="margin: 0 0 8px 0;"><strong>建議加入白名單</strong>（觀察中，不再告警）</p>
+                    <a href="{whitelist_approve_url}"
+                       style="display:inline-block; padding:8px 18px; background:#f57c00; color:white; text-decoration:none; border-radius:4px; font-weight:bold;">
+                        &#10003; 確認加入白名單
+                    </a>
+                    <p style="margin: 8px 0 0 0; color: #e65100; font-size: 12px;">點擊後此 Signature 將以 monitoring 狀態加入白名單（TTL 依設定檔）。</p>
+                </div>"""
+        else:
+            wl_section = ""
+
         return f"""
         <html>
         <body style="font-family: 'Segoe UI', sans-serif; max-width: 700px; margin: 0 auto;">
@@ -109,6 +127,8 @@ class EmailNotifier:
                 </p>
 
                 {edl_section}
+
+                {wl_section}
 
                 <h3>事件摘要</h3>
                 <table style="width: 100%; border-collapse: collapse; font-size: 14px;">

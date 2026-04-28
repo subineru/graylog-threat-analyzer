@@ -18,8 +18,9 @@ import csv
 import ipaddress
 import logging
 import os
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,7 @@ class WhitelistManager:
         self._rules: list[FPRule] = []
         self._lock = asyncio.Lock()
         self._sweeper_task: asyncio.Task | None = None
+        self._pending_rules: dict[str, dict] = {}  # token → rule_data
         self._load(csv_path)
 
     # ------------------------------------------------------------------
@@ -216,6 +218,53 @@ class WhitelistManager:
         """Hot-reload rules from CSV (call after manual CSV edit)."""
         async with self._lock:
             self._load(self._csv_path)
+
+    def suggest_rule(
+        self,
+        sig_id: str,
+        sig_name: str,
+        action: str,
+        src_ip: str = "",
+        dst_ip: str = "",
+        note: str = "",
+    ) -> str:
+        """Register a pending whitelist rule and return a one-time approval token."""
+        token = str(uuid.uuid4())
+        self._pending_rules[token] = {
+            "sig_id": sig_id,
+            "sig_name": sig_name,
+            "action": action,
+            "src_ip": src_ip,
+            "dst_ip": dst_ip,
+            "note": note or f"由 Email 核准：{date.today()}",
+            "suggested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return token
+
+    async def approve_rule(self, token: str) -> tuple[bool, str]:
+        """Consume approval token and append new rule to CSV + reload."""
+        rule_data = self._pending_rules.pop(token, None)
+        if not rule_data:
+            return False, "Token 不存在或已過期"
+        new_row = {
+            "signature_id":   rule_data["sig_id"],
+            "signature_name": rule_data["sig_name"],
+            "action":         rule_data["action"],
+            "source_ip":      rule_data["src_ip"],
+            "destination_ip": rule_data["dst_ip"],
+            "note":           rule_data["note"],
+            "status":         "monitoring",
+            "ttl_days":       str(self._default_ttl_days),
+            "last_hit_time":  "",
+            "hit_count":      "0",
+        }
+        async with self._lock:
+            with open(self._csv_path, "a", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+                writer.writerow(new_row)
+            self._load(self._csv_path)
+        logger.info(f"Whitelist rule approved: {rule_data['sig_name']}")
+        return True, f"白名單規則已新增：{rule_data['sig_name']}"
 
     # ------------------------------------------------------------------
     # Background sweeper

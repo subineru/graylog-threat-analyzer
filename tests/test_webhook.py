@@ -215,6 +215,7 @@ class TestRuleBasedTriage:
         }
         verdict = asyncio.run(engine.triage(enriched))
         assert verdict.verdict == "normal"
+        assert verdict.recommended_action == "suppress"
 
     def test_ntlmssp_from_known_endpoint_to_dc(self):
         from src.triage_engine import TriageEngine
@@ -868,3 +869,81 @@ class TestEDLActiveGate:
         token = mgr.suggest_entry("9.9.9.9")
         assert mgr.get_pending_value(token) == "9.9.9.9"
         assert mgr.get_pending_value("nonexistent") is None
+
+
+# ---------------------------------------------------------------------------
+# TestWhitelistApprove — 白名單 Email 核准流程
+# ---------------------------------------------------------------------------
+
+_WL_CSV_HEADER = (
+    "signature_id,signature_name,action,source_ip,destination_ip,"
+    "note,status,ttl_days,last_hit_time,hit_count\n"
+)
+
+
+class TestWhitelistApprove:
+    """測試白名單 suggest_rule / approve_rule 流程"""
+
+    def test_suggest_and_approve_rule(self, tmp_path):
+        import asyncio
+        from src.whitelist_manager import WhitelistManager
+
+        csv_path = tmp_path / "wl.csv"
+        csv_path.write_text(_WL_CSV_HEADER, encoding="utf-8")
+        wl = WhitelistManager(str(csv_path), default_ttl_days=90)
+
+        token = wl.suggest_rule(
+            sig_id="12345",
+            sig_name="Test Sig",
+            action="alert",
+            src_ip="10.0.0.1",
+        )
+        assert token in wl._pending_rules
+
+        success, msg = asyncio.run(wl.approve_rule(token))
+        assert success is True
+        assert "Test Sig" in msg
+        assert token not in wl._pending_rules
+
+        # Rule should now be in memory and in CSV
+        assert any(r.signature_id == "12345" for r in wl._rules)
+        csv_content = csv_path.read_text(encoding="utf-8")
+        assert "12345" in csv_content
+        assert "monitoring" in csv_content
+
+    def test_approve_invalid_token(self, tmp_path):
+        import asyncio
+        from src.whitelist_manager import WhitelistManager
+
+        csv_path = tmp_path / "wl.csv"
+        csv_path.write_text(_WL_CSV_HEADER, encoding="utf-8")
+        wl = WhitelistManager(str(csv_path), default_ttl_days=90)
+
+        success, msg = asyncio.run(wl.approve_rule("nonexistent-token"))
+        assert success is False
+        assert "Token" in msg
+
+    def test_webhook_whitelist_approve_endpoint(self, tmp_path):
+        """GET /whitelist/approve/{token} 回傳 200 並寫入 CSV"""
+        import asyncio
+        from unittest.mock import patch, MagicMock, AsyncMock
+        from fastapi.testclient import TestClient
+        from src.whitelist_manager import WhitelistManager
+        from src.webhook_server import app
+
+        csv_path = tmp_path / "wl.csv"
+        csv_path.write_text(_WL_CSV_HEADER, encoding="utf-8")
+        wl = WhitelistManager(str(csv_path), default_ttl_days=90)
+        token = wl.suggest_rule(sig_id="99999", sig_name="Monitor Sig", action="alert")
+
+        mock_triage = MagicMock()
+        mock_triage.whitelist = wl
+
+        with patch.object(app, "state", create=True) as mock_state:
+            mock_state.triage = mock_triage
+            client = TestClient(app, raise_server_exceptions=True)
+            resp = client.get(f"/whitelist/approve/{token}")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "approved"
+        assert any(r.signature_id == "99999" for r in wl._rules)

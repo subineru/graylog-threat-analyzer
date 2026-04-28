@@ -193,34 +193,44 @@ async def process_single_event(state, payload: GraylogEvent, base_url: str = "")
     dst_ip = message.get("destination_ip", "unknown")
     event_summary = f"[{verdict.verdict.upper()}] ThreatID={sig} | {src_ip} → {dst_ip}"
 
+    action = verdict.recommended_action
+
     if verdict.verdict == "duplicate":
         logger.debug(f"Suppressed duplicate: {event_summary}")
 
-    elif verdict.verdict == "anomalous" and verdict.confidence == "high":
+    elif action == "block":
         edl_approve_url = None
         if verdict.edl_entry:
             token = edl_mgr.suggest_entry(verdict.edl_entry, source_event=message)
             edl_approve_url = f"{base_url}/edl/approve/{token}"
-
         await notifier.send_alert(
-            subject=f"🔴 High Confidence Anomaly: ThreatID={sig}",
+            subject=f"🔴 Block Required: ThreatID={sig}",
             enriched_context=enriched,
             verdict=verdict,
             edl_approve_url=edl_approve_url,
         )
 
-    elif verdict.verdict == "anomalous":
+    elif action in ("monitor", "investigate"):
+        wl = triage_engine.whitelist
+        sig_id = enriched.get("event_summary", {}).get("signature_id", sig)
+        wl_token = wl.suggest_rule(
+            sig_id=sig_id,
+            sig_name=sig,
+            action=message.get("vendor_event_action", ""),
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+        )
+        wl_approve_url = f"{base_url}/whitelist/approve/{wl_token}"
+        label = "Investigate" if action == "investigate" else "Monitor"
         await notifier.send_alert(
-            subject=f"🟡 Anomaly (needs review): ThreatID={sig}",
+            subject=f"🟡 {label}: ThreatID={sig}",
             enriched_context=enriched,
             verdict=verdict,
+            whitelist_approve_url=wl_approve_url,
         )
 
-    elif verdict.verdict == "false_positive":
-        logger.info(f"False positive suppressed: {event_summary}")
-
-    else:
-        logger.info(f"Normal event: {event_summary}")
+    else:  # suppress — covers normal, false_positive, edl_active
+        logger.info(f"Suppressed: {event_summary}")
 
     # 寫入稽核紀錄
     stage = verdict.stage or "gate3_rule"
@@ -282,6 +292,16 @@ async def edl_update_ttl(
 
 
 # --- Whitelist endpoints ---
+
+@app.get("/whitelist/approve/{token}")
+async def whitelist_approve(token: str, request: Request):
+    """點擊 email 中的白名單確認連結後呼叫，將 pending 規則寫入 CSV。"""
+    wl = request.app.state.triage.whitelist
+    success, message = await wl.approve_rule(token)
+    if success:
+        return {"status": "approved", "message": message}
+    raise HTTPException(status_code=400, detail=message)
+
 
 @app.post("/whitelist/reload")
 async def whitelist_reload(request: Request):

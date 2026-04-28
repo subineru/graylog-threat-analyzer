@@ -28,6 +28,7 @@ sequenceDiagram
     participant LLM as 內部 LLM
     participant Analyst as 資安人員
     participant EDL as EDL Files
+    participant WL as Whitelist CSV
 
     PA->>GL: THREAT log (Syslog)
     Note over GL: Event Definition 偵測 RCVSS High/Medium
@@ -49,14 +50,16 @@ sequenceDiagram
         TA->>TA: SafeAudit 寫入 JSONL
     end
 
-    alt anomalous + high confidence
+    alt recommended_action = block
         TA->>Analyst: Email 告警 + EDL 確認連結
         Analyst->>TA: GET /edl/approve/token
         TA->>EDL: block_ip / block_url / block_domain
         PA->>EDL: 定期拉取 GlobalProtect EDL
-    else anomalous（其他）
-        TA->>Analyst: Email 告警（需人工研判）
-    else false_positive / normal / duplicate
+    else recommended_action = monitor / investigate
+        TA->>Analyst: Email 告警 + 白名單確認連結
+        Analyst->>TA: GET /whitelist/approve/token
+        TA->>WL: 寫入 known_fp.csv（monitoring）
+    else recommended_action = suppress
         Note over TA: 記錄 log，不通知
     end
 ```
@@ -67,19 +70,28 @@ sequenceDiagram
 
 事件依下列優先順序逐層研判，命中第一層即回傳結果：
 
-| 層級 | 機制 | 觸發條件 | 結果 | stage |
-|------|------|----------|------|-------|
-| **RL** | **Rate Limit** | 同 src_ip + sig_id 在 15 分鐘視窗內重複出現 | `duplicate` / suppress | `rate_limit` |
-| **G1** | **白名單（known_fp.csv）** | 符合 signature + action + IP 規則（支援 CIDR） | `false_positive` / suppress | `whitelist` |
-| **G2** | **黑名單（custom_blacklist.txt）** | src_ip 命中 IP/CIDR 黑名單（需 `enabled: true`） | `anomalous` / block | `blacklist` |
-| G3-1 | **固定規則：PA 已阻擋** | action = drop/block-ip/reset-both，外部 IP | `false_positive` | `gate3_rule` |
-| G3-2 | **固定規則：informational alert** | severity = informational，action = alert | `normal` | `gate3_rule` |
-| G3-3 | **固定規則：已知端點 → AD** | src = user-endpoint，dst = domain-controller，NTLMSSP | `normal` | `gate3_rule` |
-| G3-4 | **固定規則：未知外部 IP** | src 不在資產清冊且非 RFC1918 | `anomalous` / high / block | `gate3_rule` |
-| G3-5 | **固定規則：未知內部 IP** | src 不在資產清冊但為 RFC1918 | `anomalous` / medium | `gate3_rule` |
-| G3-6 | **固定規則：多 Signature 掃描** | 同 src 過去 24h 觸發 > 5 種 signature | `anomalous` / medium | `gate3_rule` |
-| G3-L | **LLM 研判** | 未命中以上規則，且已設定 LLM endpoint | LLM 回傳 verdict JSON | `gate3_llm` |
-| — | **預設** | 所有規則皆未命中 | `anomalous` / low / monitor | `gate3_rule` |
+| 層級 | 機制 | 觸發條件 | verdict | recommended_action | stage |
+|------|------|----------|---------|-------------------|-------|
+| **RL** | **Rate Limit** | 同 src_ip + sig_id 在 15 分鐘視窗內重複出現 | `duplicate` | suppress | `rate_limit` |
+| **G1** | **白名單（known_fp.csv）** | 符合 signature + action + IP 規則（支援 CIDR） | `false_positive` | suppress | `whitelist` |
+| **G1.5** | **EDL 封鎖 IP** | src_ip 已在 EDL 確認封鎖清單中 | `false_positive` | suppress | `edl_active` |
+| **G2** | **黑名單（custom_blacklist.txt）** | src_ip 命中 IP/CIDR 黑名單（需 `enabled: true`） | `anomalous` | block | `blacklist` |
+| G3-1 | **固定規則：PA 已阻擋** | action = drop/block-ip/reset-both，外部 IP | `false_positive` | suppress | `gate3_rule` |
+| G3-2 | **固定規則：informational alert** | severity = informational，action = alert | `normal` | suppress | `gate3_rule` |
+| G3-3 | **固定規則：已知端點 → AD** | src = user-endpoint，dst = domain-controller，NTLMSSP | `normal` | suppress | `gate3_rule` |
+| G3-4 | **固定規則：未知外部 IP** | src 不在資產清冊且非 RFC1918 | `anomalous` | block | `gate3_rule` |
+| G3-5 | **固定規則：未知內部 IP** | src 不在資產清冊但為 RFC1918 | `anomalous` | monitor | `gate3_rule` |
+| G3-6 | **固定規則：多 Signature 掃描** | 同 src 過去 24h 觸發 > 5 種 signature | `anomalous` | monitor | `gate3_rule` |
+| G3-L | **LLM 研判** | 未命中以上規則，且已設定 LLM endpoint | LLM 回傳 verdict JSON | LLM 決定 | `gate3_llm` |
+| — | **預設** | 所有規則皆未命中 | `anomalous` | monitor | `gate3_rule` |
+
+**路由邏輯（recommended_action → 動作）：**
+
+| recommended_action | 系統行為 |
+|--------------------|---------|
+| `block` | Email 告警 + EDL 確認按鈕（`GET /edl/approve/{token}`） |
+| `monitor` / `investigate` | Email 告警 + 白名單確認按鈕（`GET /whitelist/approve/{token}`） |
+| `suppress` | 靜默，只記 log |
 
 ---
 
