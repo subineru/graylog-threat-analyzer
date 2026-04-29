@@ -334,6 +334,18 @@ async def edl_list_entries(request: Request):
     return {"entries": edl_mgr.list_entries()}
 
 
+@app.post("/edl/entry")
+async def edl_add_direct(
+    request: Request,
+    value: str = Body(..., embed=True),
+    note: str = Body("", embed=True),
+):
+    """從 Dashboard 直接將 IP/domain 加入 EDL（不需 email token）。"""
+    edl_mgr = request.app.state.edl
+    is_new = edl_mgr.add_entry(value=value, source_signature=note, added_by="dashboard-direct")
+    return {"status": "added" if is_new else "exists_ttl_reset", "value": value}
+
+
 # --- Whitelist endpoints ---
 
 @app.get("/whitelist/approve/{token}")
@@ -344,6 +356,24 @@ async def whitelist_approve(token: str, request: Request):
     if success:
         return {"status": "approved", "message": message}
     raise HTTPException(status_code=400, detail=message)
+
+
+@app.post("/whitelist/rule/direct")
+async def whitelist_add_direct(request: Request, body: dict = Body(...)):
+    """從 Dashboard 直接新增白名單規則（suggest + 立即 approve，不需 email token）。"""
+    wl = request.app.state.triage.whitelist
+    token = wl.suggest_rule(
+        sig_id=body.get("sig_id", ""),
+        sig_name=body.get("sig_name", ""),
+        action=body.get("action", ""),
+        src_ip=body.get("src_ip", ""),
+        dst_ip=body.get("dst_ip", ""),
+        note=body.get("note", "Marked as FP from Dashboard"),
+    )
+    ok, msg = await wl.approve_rule(token)
+    if not ok:
+        raise HTTPException(status_code=409, detail=msg)
+    return {"status": "added"}
 
 
 @app.post("/whitelist/reload")
