@@ -319,7 +319,7 @@
     <div class="panel-head">Pending Review (Monitor / Investigate)</div>
     <div style="overflow-x:auto">
       <table class="tbl" id="tbl-pending">
-        <thead><tr><th>Time</th><th>Src IP</th><th>Action</th><th>Signature</th></tr></thead>
+        <thead><tr><th>Time</th><th>Src IP</th><th>Dst IP</th><th>Action</th><th>Signature</th><th>Reasoning</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -360,7 +360,7 @@
     </div>
     <div style="overflow-x:auto">
       <table class="tbl" id="tbl-edl-pending">
-        <thead><tr><th>Value</th><th>Token</th><th>Source Event</th><th>Action</th></tr></thead>
+        <thead><tr><th>Value</th><th>Signature</th><th>Suggested At</th><th>Action</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -556,8 +556,10 @@ function renderSummary(d) {
   setTbody('tbl-pending', pEvents.slice(0,20).map(ev => `<tr>
     <td class="mono">${esc(ev.timestamp||'').slice(0,16)}</td>
     <td class="mono">${esc(ev.src_ip||'')}</td>
+    <td class="mono">${esc(ev.dst_ip||'')}</td>
     <td>${badge(ev.action||'monitor', ev.action||'monitor')}</td>
     <td>${esc((ev.signature||'').slice(0,60))}</td>
+    <td style="color:var(--gray);font-size:12px">${esc((ev.reasoning||'').slice(0,100))}</td>
   </tr>`));
 
   // Blocked events
@@ -617,8 +619,8 @@ async function loadEdlPending() {
     const entries = d.pending || [];
     setTbody('tbl-edl-pending', entries.map(e => `<tr>
       <td class="mono"><strong>${esc(e.value)}</strong></td>
-      <td class="mono" style="font-size:11px;color:var(--gray)">${esc(e.token||'').slice(0,12)}…</td>
-      <td style="font-size:12px;color:var(--gray)">${esc(JSON.stringify(e.source_event||{}).slice(0,80))}</td>
+      <td>${esc(e.source_signature||'—')}</td>
+      <td class="mono">${esc((e.suggested_at||'').slice(0,16))}</td>
       <td>
         <a class="btn btn-primary btn-sm" href="/edl/approve/${esc(e.token)}">Approve</a>
         <a class="btn btn-sm" style="background:var(--gray);color:#fff;margin-left:4px"
