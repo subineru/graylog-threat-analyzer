@@ -8,6 +8,7 @@ Slide deck: Cover → Summary → Distribution → Top Threats → Blocked → P
 import io
 from datetime import datetime, timezone
 
+import lxml.etree as etree
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
@@ -53,7 +54,6 @@ def _rgb(cell, color: RGBColor):
     # remove existing solidFill if any
     for old in tcPr.findall(qn("a:solidFill")):
         tcPr.remove(old)
-    import lxml.etree as etree
     solid = etree.SubElement(tcPr, qn("a:solidFill"))
     srgb = etree.SubElement(solid, qn("a:srgbClr"))
     srgb.set("val", f"{color[0]:02X}{color[1]:02X}{color[2]:02X}")

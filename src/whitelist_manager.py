@@ -255,27 +255,24 @@ class WhitelistManager:
         return True
 
     async def approve_rule(self, token: str) -> tuple[bool, str]:
-        """Consume approval token and append new rule to CSV + reload."""
+        """Consume approval token and add rule in-memory + atomic CSV write-back."""
         rule_data = self._pending_rules.pop(token, None)
         if not rule_data:
             return False, "Token 不存在或已過期"
-        new_row = {
-            "signature_id":   rule_data["sig_id"],
-            "signature_name": rule_data["sig_name"],
-            "action":         rule_data["action"],
-            "source_ip":      rule_data["src_ip"],
-            "destination_ip": rule_data["dst_ip"],
-            "note":           rule_data["note"],
-            "status":         "monitoring",
-            "ttl_days":       str(self._default_ttl_days),
-            "last_hit_time":  "",
-            "hit_count":      "0",
-        }
+        new_rule = FPRule(
+            signature_id=rule_data["sig_id"],
+            signature_name=rule_data["sig_name"],
+            actions={rule_data["action"]} if rule_data["action"] else set(),
+            source_networks=self._parse_networks(rule_data["src_ip"]),
+            destination_networks=self._parse_networks(rule_data["dst_ip"]),
+            note=rule_data["note"],
+            status="monitoring",
+            expiry=ExpiryPolicy(ttl_days=self._default_ttl_days, last_activity=None),
+            hit_count=0,
+        )
         async with self._lock:
-            with open(self._csv_path, "a", encoding="utf-8", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-                writer.writerow(new_row)
-            self._load(self._csv_path)
+            self._rules.append(new_rule)
+        await self.write_back()
         logger.info(f"Whitelist rule approved: {rule_data['sig_name']}")
         return True, f"白名單規則已新增：{rule_data['sig_name']}"
 
