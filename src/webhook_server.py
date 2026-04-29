@@ -236,11 +236,19 @@ async def process_single_event(state, payload: GraylogEvent, base_url: str = "")
             dst_ip=dst_ip,
         )
         wl_approve_url = f"{base_url}/whitelist/approve/{wl_token}"
+
+        # investigate + edl_entry: analyst chooses block OR whitelist
+        edl_approve_url = None
+        if action == "investigate" and verdict.edl_entry:
+            edl_token = edl_mgr.suggest_entry(verdict.edl_entry, source_event=message)
+            edl_approve_url = f"{base_url}/edl/approve/{edl_token}"
+
         label = "Investigate" if action == "investigate" else "Monitor"
         await notifier.send_alert(
             subject=f"🟡 {label}: ThreatID={sig}",
             enriched_context=enriched,
             verdict=verdict,
+            edl_approve_url=edl_approve_url,
             whitelist_approve_url=wl_approve_url,
         )
 

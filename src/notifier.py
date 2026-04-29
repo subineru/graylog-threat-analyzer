@@ -82,30 +82,39 @@ class EmailNotifier:
             "normal": "#27ae60",
         }.get(verdict.verdict, "#95a5a6")
 
+        # 當 investigate 同時有 EDL 按鈕 + 白名單按鈕，顯示「二選一」說明
+        both_actions = bool(edl_approve_url and whitelist_approve_url)
+
         # EDL 封鎖建議區塊
         if verdict.edl_entry and edl_approve_url:
+            both_hint = (
+                '<p style="margin: 0 0 10px 0; color: #856404; font-size: 12px;">'
+                '⚠️ 請依調查結果二選一：確認惡意請按封鎖；確認誤判請按下方白名單。</p>'
+            ) if both_actions else ""
             edl_section = f"""
                 <div style="margin: 16px 0; padding: 14px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px;">
+                    {both_hint}
                     <p style="margin: 0 0 8px 0;"><strong>建議封鎖：</strong> <code style="background:#f8f9fa; padding:2px 6px; border-radius:3px;">{verdict.edl_entry}</code></p>
                     <a href="{edl_approve_url}"
                        style="display:inline-block; padding:8px 18px; background:#dc3545; color:white; text-decoration:none; border-radius:4px; font-weight:bold;">
                         &#10003; 確認加入 EDL 封鎖清單
                     </a>
-                    <p style="margin: 8px 0 0 0; color: #856404; font-size: 12px;">點擊上方按鈕後將立即寫入 EDL。此操作不可撤銷，請確認後再按。</p>
+                    <p style="margin: 8px 0 0 0; color: #856404; font-size: 12px;">點擊後立即寫入 EDL，PA 下次拉取生效。若誤按可至 Dashboard 移除。</p>
                 </div>"""
         elif verdict.edl_entry:
             edl_section = f"""
-                <p><strong>建議阻擋：</strong> <code>{verdict.edl_entry}</code>（尚待確認）</p>"""
+                <p style="margin:8px 0;"><strong>AI 建議封鎖：</strong> <code>{verdict.edl_entry}</code>（需人工確認）</p>"""
         else:
             edl_section = ""
 
         if whitelist_approve_url:
+            wl_label = "確認為誤判 — 加入白名單" if both_actions else "確認加入白名單"
             wl_section = f"""
                 <div style="margin: 16px 0; padding: 14px; background: #fff3e0; border: 1px solid #ff9800; border-radius: 6px;">
-                    <p style="margin: 0 0 8px 0;"><strong>建議加入白名單</strong>（觀察中，不再告警）</p>
+                    <p style="margin: 0 0 8px 0;"><strong>{'或：' if both_actions else ''}確認為誤判</strong>（加入白名單，不再告警）</p>
                     <a href="{whitelist_approve_url}"
                        style="display:inline-block; padding:8px 18px; background:#f57c00; color:white; text-decoration:none; border-radius:4px; font-weight:bold;">
-                        &#10003; 確認加入白名單
+                        &#10003; {wl_label}
                     </a>
                     <p style="margin: 8px 0 0 0; color: #e65100; font-size: 12px;">點擊後此 Signature 將以 monitoring 狀態加入白名單（TTL 依設定檔）。</p>
                 </div>"""
