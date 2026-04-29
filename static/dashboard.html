@@ -29,7 +29,8 @@
     --radius:    8px;
   }
   body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg);
-         color: var(--dark); font-size: 14px; }
+         color: var(--dark); font-size: 14px;
+         display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
 
@@ -37,20 +38,31 @@
   header {
     background: var(--navy);
     color: var(--white);
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 28px; height: 56px;
+    display: flex; align-items: center;
+    padding: 0 28px; height: 52px; flex-shrink: 0;
     box-shadow: 0 2px 6px rgba(0,0,0,.25);
-    position: sticky; top: 0; z-index: 100;
   }
   header .brand { font-size: 17px; font-weight: 700; letter-spacing: .3px; }
   header .brand span { color: var(--light-bg); font-weight: 400; margin-left: 6px; font-size: 13px; }
-  nav a {
-    color: var(--light-bg); font-size: 13px; margin-left: 20px;
-    padding: 4px 10px; border-radius: 4px; transition: background .15s;
+  .app { display: flex; flex: 1; overflow: hidden; }
+  .sidebar {
+    width: 220px; background: var(--navy); flex-shrink: 0;
+    display: flex; flex-direction: column; overflow-y: auto;
   }
-  nav a:hover, nav a.active { background: rgba(255,255,255,.15); color: #fff; text-decoration: none; }
-
-  main { max-width: 1280px; margin: 0 auto; padding: 24px 20px 48px; }
+  .content { flex: 1; overflow-y: auto; padding: 24px 28px 48px; }
+  .nav-section-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: rgba(255,255,255,.4); padding: 18px 20px 6px;
+  }
+  .nav-link {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 20px; color: rgba(255,255,255,.75);
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    border-left: 3px solid transparent; transition: background .15s, color .15s;
+    text-decoration: none;
+  }
+  .nav-link:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .nav-link.active { background: rgba(255,255,255,.12); color: #fff; border-left-color: var(--light-bg); }
 
   /* ── Toolbar ── */
   .toolbar {
@@ -206,18 +218,24 @@
 <body>
 
 <header>
-  <div class="brand">
-    Graylog Threat Analyzer
-    <span>Security Operations Dashboard</span>
-  </div>
-  <nav>
-    <a href="/dashboard" class="active">Dashboard</a>
-    <a href="/docs" target="_blank">API Docs</a>
-    <a href="/health">Health</a>
-  </nav>
+  <div class="brand">Graylog Threat Analyzer <span>Security Operations Center</span></div>
 </header>
 
-<main>
+<div class="app">
+<aside class="sidebar">
+  <div class="nav-section-label">ANALYZE</div>
+  <a class="nav-link" data-sec="dashboard" href="#dashboard">📊 Dashboard</a>
+  <a class="nav-link" data-sec="events" href="#events">🔍 Events</a>
+  <div class="nav-section-label">MANAGE</div>
+  <a class="nav-link" data-sec="edl" href="#edl">🛡 EDL</a>
+  <a class="nav-link" data-sec="whitelist" href="#whitelist">📋 Whitelist</a>
+  <div class="nav-section-label">SYSTEM</div>
+  <a class="nav-link" data-sec="audit" href="#audit">📁 Audit Log</a>
+  <a class="nav-link" data-sec="system" href="#system">⚙ System</a>
+</aside>
+<div class="content">
+
+<section id="s-dashboard">
 
   <!-- Toolbar -->
   <div class="toolbar">
@@ -241,8 +259,8 @@
   <div class="pending-banner" id="pending-banner">
     <span>⚠️</span>
     <span id="pending-text"></span>
-    <a href="#section-edl">View EDL pending ↓</a>
-    <a href="#section-wl">View Whitelist pending ↓</a>
+    <a href="#edl">View EDL pending</a>
+    <a href="#whitelist">View Whitelist pending</a>
   </div>
 
   <!-- KPI Row -->
@@ -281,25 +299,29 @@
     </div>
   </div>
 
-  <!-- Top signatures + pending events -->
-  <div class="panels">
-    <div class="panel">
-      <div class="panel-head">Top 10 Threat Signatures</div>
-      <div class="panel-body">
-        <table class="tbl" id="tbl-sigs">
-          <thead><tr><th>#</th><th>Signature</th><th>Count</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+  <!-- Top signatures -->
+  <div class="full-panel">
+    <div class="panel-head">Top 10 Threat Signatures</div>
+    <div class="panel-body">
+      <table class="tbl" id="tbl-sigs">
+        <thead><tr><th>#</th><th>Signature</th><th>Count</th></tr></thead>
+        <tbody></tbody>
+      </table>
     </div>
-    <div class="panel">
-      <div class="panel-head">Pending Review (Monitor / Investigate)</div>
-      <div class="panel-body">
-        <table class="tbl" id="tbl-pending">
-          <thead><tr><th>Time</th><th>Src IP</th><th>Action</th><th>Signature</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+  </div>
+
+</section><!-- /s-dashboard -->
+
+<section id="s-events" hidden>
+
+  <!-- Pending events -->
+  <div class="full-panel">
+    <div class="panel-head">Pending Review (Monitor / Investigate)</div>
+    <div style="overflow-x:auto">
+      <table class="tbl" id="tbl-pending">
+        <thead><tr><th>Time</th><th>Src IP</th><th>Action</th><th>Signature</th></tr></thead>
+        <tbody></tbody>
+      </table>
     </div>
   </div>
 
@@ -314,8 +336,11 @@
     </div>
   </div>
 
-  <!-- EDL Management -->
-  <div class="full-panel" id="section-edl">
+</section><!-- /s-events -->
+
+<section id="s-edl" hidden>
+
+  <div class="full-panel">
     <div class="panel-head">
       EDL — Active Block List
       <button class="btn btn-primary btn-sm" onclick="loadEdl()">Refresh</button>
@@ -328,7 +353,6 @@
     </div>
   </div>
 
-  <!-- EDL Pending -->
   <div class="full-panel">
     <div class="panel-head">
       EDL — Pending Approval
@@ -342,8 +366,11 @@
     </div>
   </div>
 
-  <!-- Whitelist Management -->
-  <div class="full-panel" id="section-wl">
+</section><!-- /s-edl -->
+
+<section id="s-whitelist" hidden>
+
+  <div class="full-panel">
     <div class="panel-head">
       Whitelist Rules
       <button class="btn btn-primary btn-sm" onclick="loadWhitelist()">Refresh</button>
@@ -356,7 +383,35 @@
     </div>
   </div>
 
-</main>
+</section><!-- /s-whitelist -->
+
+<section id="s-audit" hidden>
+  <div class="full-panel">
+    <div class="panel-head">Audit Log</div>
+    <div class="panel-body" style="color:var(--gray);font-style:italic;text-align:center;padding:40px">
+      功能開發中
+    </div>
+  </div>
+</section><!-- /s-audit -->
+
+<section id="s-system" hidden>
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-head">Service Health</div>
+      <div class="panel-body" id="sys-health-body">Loading…</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">Quick Links</div>
+      <div class="panel-body">
+        <p style="margin-bottom:12px"><a href="/docs" target="_blank">API Documentation (Swagger)</a></p>
+        <p><a href="/health" target="_blank">Health Endpoint (JSON)</a></p>
+      </div>
+    </div>
+  </div>
+</section><!-- /s-system -->
+
+</div><!-- /content -->
+</div><!-- /app -->
 
 <div id="toast"></div>
 
@@ -617,20 +672,46 @@ $('btn-pptx').addEventListener('click', () => {
 // ── Load button ───────────────────────────────────────────────────────────────
 $('btn-load').addEventListener('click', loadSummary);
 
+// ── Section routing ───────────────────────────────────────────────────────────
+function showSection(id) {
+  document.querySelectorAll('.content > section').forEach(s => { s.hidden = true; });
+  document.querySelectorAll('.nav-link').forEach(a => a.classList.remove('active'));
+  const section = document.getElementById('s-' + id);
+  if (section) section.hidden = false;
+  const link = document.querySelector(`.nav-link[data-sec="${id}"]`);
+  if (link) link.classList.add('active');
+  if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+}
+
+window.addEventListener('hashchange', () => {
+  showSection(location.hash.slice(1) || 'dashboard');
+});
+
+async function loadSystemHealth() {
+  try {
+    const r = await fetch('/health');
+    const d = await r.json();
+    $('sys-health-body').innerHTML =
+      `<pre style="font-size:12px;line-height:1.6;margin:0">${JSON.stringify(d, null, 2)}</pre>`;
+  } catch(err) {
+    $('sys-health-body').textContent = 'Health check failed: ' + err.message;
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 initDates();
-
-// Set "Today" as default active preset
 document.querySelector('.preset-btn[data-days="0"]').classList.add('active');
+showSection(location.hash.slice(1) || 'dashboard');
 
-// Load all panels on startup
 loadSummary();
 loadEdl();
 loadEdlPending();
 loadWhitelist();
+loadSystemHealth();
 
 // Auto-refresh every 60 seconds
 setInterval(() => {
+  if (document.hidden) return;
   loadSummary();
   loadEdl();
   loadEdlPending();

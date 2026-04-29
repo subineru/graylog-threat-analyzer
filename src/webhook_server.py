@@ -512,10 +512,12 @@ async def report_pptx(
     end:   str | None = Query(default=None, description="YYYY-MM-DD"),
 ):
     """Generate and download a PowerPoint report for the given date range."""
+    import asyncio
     s, e = _parse_date_range(start, end)
     safe_audit: SafeAudit = request.app.state.safe_audit
     stats = safe_audit.aggregate(s, e)
-    pptx_bytes = generate_pptx(stats)
+    loop = asyncio.get_event_loop()
+    pptx_bytes = await loop.run_in_executor(None, generate_pptx, stats)
     filename = f"threat_report_{s}_{e}.pptx"
     return Response(
         content=pptx_bytes,
