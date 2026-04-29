@@ -330,7 +330,7 @@
     <div class="panel-head">Blocked Events (EDL Candidates)</div>
     <div style="overflow-x:auto">
       <table class="tbl" id="tbl-blocked">
-        <thead><tr><th>Time</th><th>Src IP</th><th>Dst IP</th><th>Signature</th><th>Reasoning</th></tr></thead>
+        <thead><tr><th>Time</th><th>Src IP</th><th>Dst IP</th><th>Signature</th><th>Reasoning</th><th>Action</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -568,6 +568,12 @@ function renderSummary(d) {
     <td class="mono">${esc(ev.dst_ip||'')}</td>
     <td>${esc((ev.signature||'').slice(0,60))}</td>
     <td style="color:var(--gray);font-size:12px">${esc((ev.reasoning||'').slice(0,100))}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-danger btn-sm"
+        onclick="blockIp('${esc(ev.src_ip||'')}','${esc(ev.signature||'')}')">Block</button>
+      <button class="btn btn-sm" style="background:var(--orange);color:#fff;margin-left:4px"
+        onclick="markFalsePositive('${esc(ev.signature_id||ev.signature||'')}','${esc(ev.action||'')}','${esc(ev.src_ip||'')}')">FP</button>
+    </td>
   </tr>`));
 }
 
@@ -654,6 +660,39 @@ async function removeWhitelistRule(sigId) {
     const r = await fetch('/whitelist/rule/' + encodeURIComponent(sigId), { method: 'DELETE' });
     if (!r.ok) throw new Error((await r.json()).detail);
     showToast(`Whitelist rule removed: ${sigId}`);
+    loadWhitelist();
+  } catch(err) {
+    showToast('Error: ' + err.message, true);
+  }
+}
+
+// ── Blocked Events Actions ────────────────────────────────────────────────────
+async function blockIp(ip, signature) {
+  if (!ip || !confirm(`Add ${ip} to EDL block list?`)) return;
+  try {
+    const r = await fetch('/edl/entry', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({value: ip, note: signature}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail);
+    showToast(d.status === 'added' ? `${ip} added to EDL` : `${ip} already in EDL (TTL reset)`);
+    loadEdl();
+  } catch(err) {
+    showToast('Error: ' + err.message, true);
+  }
+}
+
+async function markFalsePositive(sigId, action, srcIp) {
+  if (!sigId || !confirm(`Mark "${sigId}" as false positive and add to whitelist?`)) return;
+  try {
+    const r = await fetch('/whitelist/rule/direct', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sig_id: sigId, sig_name: sigId, action, src_ip: srcIp}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail);
+    showToast(`Whitelist rule added for ${sigId}`);
     loadWhitelist();
   } catch(err) {
     showToast('Error: ' + err.message, true);

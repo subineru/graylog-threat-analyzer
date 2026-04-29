@@ -150,12 +150,13 @@ class SafeAudit:
                 daily_counts[ts[:10]] += 1
 
             event_row = {
-                "timestamp": ts[:19].replace("T", " ") if ts else "",
-                "src_ip": es.get("source_ip", ""),
-                "dst_ip": es.get("destination_ip", ""),
-                "signature": sig,
-                "action": action,
-                "reasoning": v.get("reasoning", ""),
+                "timestamp":    ts[:19].replace("T", " ") if ts else "",
+                "src_ip":       es.get("source_ip", ""),
+                "dst_ip":       es.get("destination_ip", ""),
+                "signature":    sig,
+                "signature_id": es.get("signature_id", "") or es.get("threat_id", ""),
+                "action":       action,
+                "reasoning":    v.get("reasoning", ""),
             }
             if action == "block":
                 block_events.append(event_row)
