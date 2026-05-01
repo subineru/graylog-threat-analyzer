@@ -33,8 +33,10 @@
 - 同一來源 IP + 同一 signature，過去 24 小時觸發次數: {same_src_same_sig_24h}
 - 同一來源 IP + 其他 signature，過去 24 小時觸發次數: {same_src_other_sig_24h}
 - 同一目標 IP + 同一 signature，過去 24 小時觸發次數: {same_dst_same_sig_24h}
+- 歷史 14 天日均觸發次數 / z-score: {daily_avg} 次 / z={z_score}（方法: {freq_method}）
+- 今日 vs 7 日均比率（z-score 不可用時）: {ratio}x
 
-（解讀參考：同來源單日 > 10 次同 signature 為偏高；同來源觸發 > 5 種不同 signature 為疑似橫向掃描）
+（解讀參考：同來源觸發 > 5 種不同 signature 為疑似橫向掃描；z ≥ 2 或 ratio ≥ 3 視為頻率異常，提高 anomalous 可能性）
 
 ## 威脅情資
 
@@ -47,7 +49,8 @@
 2. 如果來源為內部使用者，且行為符合其角色（例如 IT 人員使用 MSRPC 存取 AD），通常為 **normal**。
 3. 如果來源為內部使用者，但行為不符合其角色（例如 RD 人員嘗試 PSEXEC 到非授權主機），應判為 **anomalous**。
 4. 如果同一來源 IP 在短時間內觸發多種不同 signature，提高異常可能性。
-5. severity 為 informational 且 action 為 alert 的事件，大多為偵測型規則，傾向 normal 或 false_positive。
+5. 如果 z-score ≥ 2 或 ratio ≥ 3，表示今日頻率明顯高於歷史基準，應提高異常評估權重。
+6. severity 為 informational 且 action 為 alert 的事件，大多為偵測型規則，傾向 normal 或 false_positive。
 
 ## recommended_action 語意
 

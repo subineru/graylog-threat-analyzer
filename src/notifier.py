@@ -222,10 +222,20 @@ class EmailNotifier:
             _row("RCVSS",          summary.get("rcvss", ""), False),
         ])
 
+        z_score = freq.get("z_score")
+        ratio   = freq.get("ratio")
+        daily_avg = freq.get("daily_avg")
+        freq_method = freq.get("freq_method", "")
+        stat_label = (
+            f"z={z_score:.2f}（日均 {daily_avg} 次）" if z_score is not None and daily_avg is not None
+            else f"{ratio:.2f}x（日均 {daily_avg} 次）" if ratio is not None and daily_avg is not None
+            else "N/A"
+        )
         freq_rows = "".join([
             _row("同來源 + 同 Signature",   f"{freq.get('same_src_same_sig_24h','N/A')} 次"),
             _row("同來源 + 其他 Signature", f"{freq.get('same_src_other_sig_24h','N/A')} 次", True),
             _row("同目標 + 同 Signature",   f"{freq.get('same_dst_same_sig_24h','N/A')} 次"),
+            _row("頻率異常指標",            stat_label, True),
         ])
 
         return f"""<!DOCTYPE html>
