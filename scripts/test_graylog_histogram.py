@@ -138,11 +138,10 @@ def _extract_daily_counts(data: dict) -> list[int] | None:
 
     counts = []
     for row in rows:
-        # 略過 rollup 彙總列（key 為空或 source 為 "non-leaf"）
-        if row.get("source") in ("non-leaf",):
+        if row.get("source") == "non-leaf":
             continue
         for val in row.get("values", []):
-            if "count" in str(val.get("key", [])).lower() and not val.get("rollup", True):
+            if val.get("key") == ["count()"]:
                 counts.append(int(val.get("value") or 0))
                 break
 
