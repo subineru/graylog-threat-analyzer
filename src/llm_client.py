@@ -228,6 +228,10 @@ class LLMClient:
             "{same_src_same_sig_24h}": str(freq.get("same_src_same_sig_24h", "N/A")),
             "{same_src_other_sig_24h}": str(freq.get("same_src_other_sig_24h", "N/A")),
             "{same_dst_same_sig_24h}": str(freq.get("same_dst_same_sig_24h", "N/A")),
+            "{z_score}": str(freq.get("z_score", "N/A")),
+            "{daily_avg}": str(freq.get("daily_avg", "N/A")),
+            "{ratio}": str(freq.get("ratio", "N/A")),
+            "{freq_method}": str(freq.get("freq_method", "N/A")),
             "{source_ip_reputation}": intel.get("source_ip_reputation", "N/A"),
             "{destination_ip_reputation}": intel.get("destination_ip_reputation", "N/A"),
         }

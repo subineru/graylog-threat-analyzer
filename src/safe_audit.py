@@ -33,6 +33,7 @@ class SafeAudit:
             "stage": stage,
             "verdict": verdict.model_dump(),
             "event_summary": enriched.get("event_summary", {}),
+            "frequency_context": enriched.get("frequency_context", {}),
         }
         line = json.dumps(payload, ensure_ascii=False)
         path = self._today_path()
@@ -62,6 +63,7 @@ class SafeAudit:
         columns = [
             "timestamp", "stage", "verdict", "confidence", "reasoning",
             "recommended_action", "src_ip", "dst_ip", "signature_id", "signature_name",
+            "z_score", "freq_method",
         ]
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
@@ -78,6 +80,7 @@ class SafeAudit:
                     continue
                 v = rec.get("verdict", {})
                 es = rec.get("event_summary", {})
+                freq = rec.get("frequency_context", {})
                 writer.writerow({
                     "timestamp":          rec.get("timestamp", ""),
                     "stage":              rec.get("stage", ""),
@@ -89,6 +92,8 @@ class SafeAudit:
                     "dst_ip":             es.get("destination_ip", ""),
                     "signature_id":       es.get("signature_id", "") or es.get("threat_id", ""),
                     "signature_name":     es.get("signature_name", "") or es.get("alert_signature", ""),
+                    "z_score":            freq.get("z_score", ""),
+                    "freq_method":        freq.get("freq_method", ""),
                 })
 
         return output.getvalue()
