@@ -51,7 +51,7 @@ RANGE_30D_SEC = 30 * 24 * 3600
 RANGE_24H_SEC = 24 * 3600
 
 GET_HEADERS  = {"Accept": "application/json"}
-POST_HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
+POST_HEADERS = {"Accept": "application/json", "Content-Type": "application/json", "X-Requested-By": "cli"}
 AUTH         = (API_TOKEN, "token")
 
 
@@ -116,7 +116,7 @@ def _views_body(interval_config: dict) -> dict:
                     "interval": interval_config,
                 }],
                 "column_groups": [],
-                "metrics": [{"type": "count", "id": "count()"}],
+                "series": [{"type": "count", "id": "count()"}],
                 "rollup": True,
                 "filter": None,
                 "streams": [],
@@ -224,7 +224,7 @@ async def test_views_day() -> list[int] | None:
     print("\n[Test 4] POST /views/search/sync（interval: timeunit 1 day）")
     return await _call_views(
         "1day",
-        {"type": "timeunit", "value": 1, "unit": "days"},
+        {"type": "timeunit", "timeunit": "1d"},
     )
 
 
