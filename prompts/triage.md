@@ -5,9 +5,9 @@
 ## 你的任務
 
 根據以下事件摘要與上下文，判斷此事件屬於：
-- **anomalous**（異常，需要進一步處理）
-- **false_positive**（誤判，可安全忽略）
-- **normal**（正常行為，無需處理）
+- **anomalous**（行為可疑或確認為威脅，需要進一步處理）
+- **false_positive**（該 signature 在此環境本就不應觸發，屬設定問題或已知雜訊）
+- **normal**（行為完全符合預期，無任何異常特徵）
 
 ## 事件摘要
 
@@ -34,6 +34,8 @@
 - 同一來源 IP + 其他 signature，過去 24 小時觸發次數: {same_src_other_sig_24h}
 - 同一目標 IP + 同一 signature，過去 24 小時觸發次數: {same_dst_same_sig_24h}
 
+（解讀參考：同來源單日 > 10 次同 signature 為偏高；同來源觸發 > 5 種不同 signature 為疑似橫向掃描）
+
 ## 威脅情資
 
 - 來源 IP 信譽: {source_ip_reputation}
@@ -49,12 +51,17 @@
 
 ## recommended_action 語意
 
-- **block**：確認為外部威脅或明確惡意行為，建議加入 EDL 封鎖清單。
-- **investigate**：行為可疑但無法確認，需人工調查（如未知內部 IP 行為異常、來源不明）。
-- **monitor**：觸發次數偏高或有輕微異常特徵，但暫不需立即行動，持續觀察。
-- **suppress**：正常行為、已防禦或誤判，靜默抑制即可，不需通知。
+- **block**：確認為外部威脅或明確惡意行為，建議加入 EDL 封鎖清單。`edl_entry` 必須填入來源 IP 或惡意 URL/domain。
+- **investigate**：行為可疑但無法確認，需人工調查（如未知內部 IP 行為異常、來源不明）。若有明確可疑 IP，請填入 `edl_entry`（分析師可自行選擇封鎖或加入白名單）；否則填 null。
+- **monitor**：觸發次數偏高或有輕微異常特徵，但暫不需立即行動，持續觀察。`edl_entry` 填 null。
+- **suppress**：正常行為、已防禦或誤判，靜默抑制即可，不需通知。`edl_entry` 填 null。
 
 ## 回應格式
+
+`confidence` 判斷標準：
+- **high**：有明確 IOC（惡意 IP 信譽）或行為完全符合已知攻擊模式，無合理替代解釋
+- **medium**：行為可疑但有合理替代解釋，或脈絡不完整
+- **low**：僅憑 signature 名稱觸發，無其他佐證支持
 
 請嚴格以下列 JSON 格式回應，不要包含任何其他文字：
 
