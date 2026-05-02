@@ -27,6 +27,7 @@
 
 - **來源主機**: {source_hostname} / 角色: {source_role} / 部門: {source_department}
 - **目標主機**: {destination_hostname} / 角色: {destination_role} / 部門: {destination_department}
+- **供應商識別**: {vendor_name}（N/A 表示非已知供應商）
 
 ## 頻率上下文
 

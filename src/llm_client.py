@@ -65,9 +65,27 @@ class LLMClient:
 
         src_asset = asset.get("source_asset", {})
         dst_asset = asset.get("destination_asset", {})
+        vendor_info = asset.get("vendor_info")
         src_role = src_asset.get("role", "unknown")
         dst_role = dst_asset.get("role", "unknown")
         src_known = src_asset.get("hostname", "unknown") != "unknown"
+
+        # 規則 0: 已知供應商 + 目標 IP 符合 + service 符合 → 正常傳檔行為
+        if vendor_info:
+            v_dst = vendor_info.get("destination_ip", "")
+            v_svc = vendor_info.get("allowed_service", "any")
+            protocol = summary.get("protocol", "").lower()
+            dst_matches = not v_dst or v_dst == summary.get("destination_ip", "")
+            svc_matches = v_svc == "any" or v_svc in protocol
+            if dst_matches and svc_matches:
+                return TriageVerdict(
+                    verdict="normal",
+                    confidence="high",
+                    reasoning=f"來源 IP 為已知供應商 {vendor_info['vendor_name']}，"
+                              f"連線目標與服務符合白名單設定，屬正常傳檔行為。",
+                    recommended_action="suppress",
+                    stage="gate3_rule",
+                )
 
         # 規則 1: PA 已阻擋的外部攻擊
         if action in ("drop", "block-ip", "reset-both") and not self._is_internal(source_ip):
@@ -202,6 +220,7 @@ class LLMClient:
 
         src_asset = asset.get("source_asset", {})
         dst_asset = asset.get("destination_asset", {})
+        vendor_info = asset.get("vendor_info") or {}
 
         prompt = self.prompt_template
         replacements = {
@@ -222,6 +241,7 @@ class LLMClient:
             "{source_hostname}": src_asset.get("hostname", "unknown"),
             "{source_role}": src_asset.get("role", "unknown"),
             "{source_department}": src_asset.get("department", "unknown"),
+            "{vendor_name}": vendor_info.get("vendor_name", "N/A"),
             "{destination_hostname}": dst_asset.get("hostname", "unknown"),
             "{destination_role}": dst_asset.get("role", "unknown"),
             "{destination_department}": dst_asset.get("department", "unknown"),

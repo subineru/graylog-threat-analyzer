@@ -7,12 +7,15 @@ Context Enrichment Service
 3. 威脅情資查詢（外部 IP 的信譽評分）
 """
 
+import asyncio
 import csv
 import logging
+import socket
 from pathlib import Path
 
 from .graylog_client import GraylogClient
 from .normalizers.pan_threat import normalize
+from .vendor_lookup import VendorLookup
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +58,9 @@ class EnrichmentService:
     def __init__(self, config: dict):
         self.config = config
         asset_csv = config.get("assets", {}).get("csv_path", "config/assets.csv")
+        vendor_csv = config.get("vendors", {}).get("csv_path", "config/vendors.csv")
         self.asset_lookup = AssetLookup(asset_csv)
+        self.vendor_lookup = VendorLookup(vendor_csv)
         self.graylog = GraylogClient(config)
 
     async def enrich(self, message: dict) -> dict:
@@ -70,6 +75,15 @@ class EnrichmentService:
         # 1. 資產查詢
         source_asset = self.asset_lookup.lookup(source_ip)
         destination_asset = self.asset_lookup.lookup(destination_ip)
+
+        # 1a. DNS PTR 補充（僅限內部未知主機，timeout 2s）
+        if source_asset["hostname"] == "unknown" and self._is_internal(source_ip):
+            source_asset = {**source_asset, "hostname": await self._ptr_lookup(source_ip)}
+        if destination_asset["hostname"] == "unknown" and self._is_internal(destination_ip):
+            destination_asset = {**destination_asset, "hostname": await self._ptr_lookup(destination_ip)}
+
+        # 1b. 供應商查詢（外部 IP）
+        vendor_info = self.vendor_lookup.lookup(source_ip) if not self._is_internal(source_ip) else None
 
         # 2. 頻率查詢
         frequency = await self.graylog.query_frequency(source_ip, destination_ip, threat_id)
@@ -101,6 +115,7 @@ class EnrichmentService:
             "asset_context": {
                 "source_asset": source_asset,
                 "destination_asset": destination_asset,
+                "vendor_info": vendor_info,
             },
             "frequency_context": frequency,
             "threat_intel": {
@@ -109,6 +124,18 @@ class EnrichmentService:
             },
             "raw_message": message,
         }
+
+    async def _ptr_lookup(self, ip: str) -> str:
+        """DNS PTR 反解（僅用於補充內部未知主機名）。查詢失敗回傳 'unknown'。"""
+        loop = asyncio.get_event_loop()
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, socket.gethostbyaddr, ip),
+                timeout=2.0,
+            )
+            return result[0]
+        except Exception:
+            return "unknown"
 
     async def _check_reputation(self, ip: str) -> str:
         """查詢外部威脅情資（僅限非 RFC1918 IP）"""
