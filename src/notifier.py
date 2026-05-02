@@ -89,11 +89,12 @@ class EmailNotifier:
         whitelist_approve_url: str | None = None,
     ) -> str:
         """產生 HTML email 內容（專業藍色主題）"""
-        summary = enriched.get("event_summary", {})
-        asset   = enriched.get("asset_context", {})
-        freq    = enriched.get("frequency_context", {})
-        src     = asset.get("source_asset", {})
-        dst     = asset.get("destination_asset", {})
+        summary     = enriched.get("event_summary", {})
+        asset       = enriched.get("asset_context", {})
+        freq        = enriched.get("frequency_context", {})
+        src         = asset.get("source_asset", {})
+        dst         = asset.get("destination_asset", {})
+        vendor_info = asset.get("vendor_info") or {}
 
         verdict_color = {
             "anomalous":     _RED,
@@ -212,14 +213,25 @@ class EmailNotifier:
         src_user   = summary.get("source_user", "") or "N/A"
         dst_user   = summary.get("destination_user", "") or "N/A"
 
+        protocol = summary.get("protocol", "")
+        dst_port = summary.get("destination_port", "")
+        app_display = f"{protocol} : {dst_port}" if protocol and dst_port else protocol or dst_port or "—"
+
+        vendor_row = (
+            _row("供應商", vendor_info["vendor_name"], True)
+            if vendor_info.get("vendor_name") else ""
+        )
+
         event_rows = "".join([
-            _row("Signature",      sig_display),
-            _row("Severity / Action", f"{summary.get('severity','')} / {summary.get('action','')}", True),
-            _row("來源 IP",         f"{src_label} — {src_user}"),
-            _row("目標 IP",         f"{dst_label} — {dst_user}", True),
-            _row("Zone 流向",       summary.get("zone_flow", ""), False),
-            _row("防火牆規則",      summary.get("rule_name", ""), True),
-            _row("RCVSS",          summary.get("rcvss", ""), False),
+            _row("Signature",          sig_display),
+            _row("Severity / Action",  f"{summary.get('severity','')} / {summary.get('action','')}", True),
+            _row("來源 IP",             f"{src_label} — {src_user}"),
+            _row("目標 IP",             f"{dst_label} — {dst_user}", True),
+            _row("Application / 協定", app_display),
+            _row("Zone 流向",          summary.get("zone_flow", ""), True),
+            _row("防火牆規則",         summary.get("rule_name", ""), False),
+            _row("RCVSS",             summary.get("rcvss", ""), True),
+            vendor_row,
         ])
 
         z_score = freq.get("z_score")

@@ -1,0 +1,11 @@
+# 供應商 IP 清單
+# 欄位說明：
+#   ip_or_cidr      - 供應商 IP 或 CIDR 區段（如 1.2.3.4 或 1.2.3.0/24）
+#   vendor_name     - 供應商名稱（顯示於 email 與 LLM context）
+#   allowed_service - 允許的服務類型（ftp / sftp / https / any）
+#   destination_ip  - 允許連線的目標 IP（留空表示任意內部目標）
+#   note            - 備註說明
+ip_or_cidr,vendor_name,allowed_service,destination_ip,note
+1.2.3.4,Vendor-A Inc,ftp,10.10.1.5,每週五傳送報表
+1.2.3.0/24,Vendor-B Group,sftp,10.10.1.5,
+5.6.7.8,Vendor-C Logistics,ftp,10.10.1.6,

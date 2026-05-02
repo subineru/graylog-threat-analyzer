@@ -18,7 +18,7 @@
 - **來源使用者**: {source_user}
 - **目標 IP**: {destination_ip}
 - **目標使用者**: {destination_user}
-- **協定**: {application_name} / {network_transport}
+- **協定 / 目標端口**: {protocol} : {destination_port}
 - **方向**: {direction}
 - **Zone 流向**: {source_zone} → {destination_zone}
 - **防火牆規則**: {rule_name}
@@ -27,6 +27,7 @@
 
 - **來源主機**: {source_hostname} / 角色: {source_role} / 部門: {source_department}
 - **目標主機**: {destination_hostname} / 角色: {destination_role} / 部門: {destination_department}
+- **供應商識別**: {vendor_name}（N/A 表示非已知供應商）
 
 ## 頻率上下文
 

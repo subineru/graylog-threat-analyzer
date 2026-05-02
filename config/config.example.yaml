@@ -76,6 +76,11 @@ assets:
   # 資產清冊 CSV 路徑
   csv_path: "config/assets.csv"
 
+vendors:
+  # 供應商 IP 清單 CSV 路徑（格式參考 config/vendors.example.csv）
+  # 支援精確 IP 與 CIDR 網段，用於識別合法的供應商傳檔行為
+  csv_path: "config/vendors.csv"
+
 whitelist:
   # 已知誤判白名單 CSV 路徑
   csv_path: "config/known_fp.csv"
