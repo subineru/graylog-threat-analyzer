@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from .edl_manager import EDLManager
+from .whitelist_manager import WhitelistManager
 from .enrichment import EnrichmentService
 from .notifier import EmailNotifier
 from .report_generator import generate_pptx
@@ -404,6 +405,10 @@ async def whitelist_stats(request: Request):
         rules.append({
             "signature_id": rule.signature_id,
             "signature_name": rule.signature_name,
+            "source_ip":      WhitelistManager._networks_to_str(rule.source_networks),
+            "destination_ip": WhitelistManager._networks_to_str(rule.destination_networks),
+            "action":         ", ".join(sorted(rule.actions)) if rule.actions else "",
+            "ttl_days":       rule.expiry.ttl_days,
             "note": rule.note,
             "status": rule.status,
             "hit_count": rule.hit_count,
