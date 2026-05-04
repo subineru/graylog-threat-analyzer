@@ -256,7 +256,7 @@ const WhitelistPage = ({rules,onAdd,onEdit,onDelete,onReload}) => {
               <thead><tr><TH>Sig ID</TH><TH>Signature 名稱</TH><TH>動作</TH><TH>來源 IP</TH><TH>目的 IP</TH><TH>備註</TH><TH>狀態</TH><TH>TTL</TH><TH>命中</TH><TH>最後命中</TH><TH></TH></tr></thead>
               <tbody>
                 {filtered.map((r,i)=>(
-                  <tr key={r.id} style={{background:i%2?'#f8fafc':'#fff'}}>
+                  <tr key={`${r.id}_${i}`} style={{background:i%2?'#f8fafc':'#fff'}}>
                     <TD style={{fontFamily:'var(--mono)',fontSize:11,color:'var(--blue)',fontWeight:600}}>{r.sig_id}</TD>
                     <TD style={{maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.sig_name}</TD>
                     <TD><Pill>{r.action||'any'}</Pill></TD>

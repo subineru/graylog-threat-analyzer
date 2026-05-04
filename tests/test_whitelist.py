@@ -255,3 +255,44 @@ class TestTtlDaysPropagation:
             assert not rule.expiry.is_expired()
         finally:
             _teardown(path)
+
+
+# ---------------------------------------------------------------------------
+# approve_rule — compound-key deduplication
+# ---------------------------------------------------------------------------
+
+class TestApproveRuleDedup:
+    """
+    Regression: approve_rule previously used append-only, allowing the same
+    rule to accumulate multiple times (duplicate React keys, wrong hit counts).
+    Fix: dedup by (sig_id, src_ip, dst_ip) — exact compound match is replaced,
+    same sig_id with different IPs is allowed.
+    """
+
+    def _approve(self, wl, sig_id, src_ip="", dst_ip=""):
+        token = wl.suggest_rule(sig_id=sig_id, sig_name=f"Sig {sig_id}", action="", src_ip=src_ip, dst_ip=dst_ip)
+        return asyncio.get_event_loop().run_until_complete(wl.approve_rule(token))
+
+    def test_approve_same_rule_twice_keeps_one(self):
+        """Approving identical (sig_id, src_ip, dst_ip) twice → only one rule survives."""
+        wl, path = _make_manager()
+        try:
+            self._approve(wl, "39154", "192.168.1.1", "")
+            self._approve(wl, "39154", "192.168.1.1", "")
+            matching = [r for r in wl._rules if r.signature_id == "39154"]
+            assert len(matching) == 1
+        finally:
+            _teardown(path)
+
+    def test_approve_same_sigid_different_src_ip_keeps_both(self):
+        """Same sig_id but different src_ip → both rules coexist (multi-host whitelist)."""
+        wl, path = _make_manager()
+        try:
+            self._approve(wl, "39154", "192.168.1.1", "")
+            self._approve(wl, "39154", "192.168.2.2", "")
+            matching = [r for r in wl._rules if r.signature_id == "39154"]
+            assert len(matching) == 2
+            src_ips = {WhitelistManager._networks_to_str(r.source_networks) for r in matching}
+            assert src_ips == {"192.168.1.1", "192.168.2.2"}
+        finally:
+            _teardown(path)
