@@ -275,6 +275,14 @@ class WhitelistManager:
             hit_count=0,
         )
         async with self._lock:
+            self._rules = [
+                r for r in self._rules
+                if not (
+                    r.signature_id == new_rule.signature_id
+                    and self._networks_to_str(r.source_networks) == self._networks_to_str(new_rule.source_networks)
+                    and self._networks_to_str(r.destination_networks) == self._networks_to_str(new_rule.destination_networks)
+                )
+            ]
             self._rules.append(new_rule)
         await self.write_back()
         logger.info(f"Whitelist rule approved: {rule_data['sig_name']}")
