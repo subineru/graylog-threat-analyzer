@@ -96,6 +96,7 @@ class WhitelistManager:
                 hit_count=hit_count,
             ))
         self._rules = rules
+        self._rules = self._dedup_rules(self._rules)
         logger.info(f"Loaded {len(self._rules)} whitelist rules from {csv_path}")
 
     # ------------------------------------------------------------------
@@ -134,6 +135,16 @@ class WhitelistManager:
                 except ValueError:
                     pass
         return False
+
+    def _dedup_rules(self, rules: list) -> list:
+        """Keep last occurrence of each (sig_id, src_ip, dst_ip) triple."""
+        seen: dict[tuple, int] = {}
+        for i, r in enumerate(rules):
+            key = (r.signature_id,
+                   self._networks_to_str(r.source_networks),
+                   self._networks_to_str(r.destination_networks))
+            seen[key] = i
+        return [rules[i] for i in sorted(seen.values())]
 
     @staticmethod
     def _extract_sig_id(signature: str) -> str:
@@ -275,15 +286,8 @@ class WhitelistManager:
             hit_count=0,
         )
         async with self._lock:
-            self._rules = [
-                r for r in self._rules
-                if not (
-                    r.signature_id == new_rule.signature_id
-                    and self._networks_to_str(r.source_networks) == self._networks_to_str(new_rule.source_networks)
-                    and self._networks_to_str(r.destination_networks) == self._networks_to_str(new_rule.destination_networks)
-                )
-            ]
             self._rules.append(new_rule)
+            self._rules = self._dedup_rules(self._rules)
         await self.write_back()
         logger.info(f"Whitelist rule approved: {rule_data['sig_name']}")
         return True, f"白名單規則已新增：{rule_data['sig_name']}"
