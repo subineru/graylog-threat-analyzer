@@ -297,16 +297,19 @@ const AuditPage = () => {
   const [expand,setExpand]=useState(null);
   const [loadingAudit,setLoadingAudit]=useState(false);
 
-  const loadAudit = useCallback(async (d) => {
+  const loadAudit = useCallback(async (d, signal) => {
     setLoadingAudit(true);
     setRecords([]);
     try {
-      const r = await fetch(`/audit/export?date=${d}&format=jsonl`);
+      const r = await fetch(`/audit/export?date=${d}&format=jsonl`, {signal});
       if(!r.ok){ setRecords([]); return; }
       const text = await r.text();
       const rows = text.trim().split('\n')
         .filter(Boolean)
-        .map(line=>{ try{return JSON.parse(line);}catch{return null;} })
+        .map((line, idx)=>{
+          try{ return JSON.parse(line); }
+          catch(e){ console.warn(`JSONL parse error at line ${idx}:`, e.message); return null; }
+        })
         .filter(Boolean)
         .map((rec,i)=>({
           id:                 `a${i}`,
@@ -322,12 +325,18 @@ const AuditPage = () => {
           sig_name:           rec.event_summary?.signature_name || rec.event_summary?.alert_signature || '—',
         }));
       setRecords(rows);
+    } catch(e) {
+      if(e.name !== 'AbortError') console.error('Audit load failed:', e);
     } finally {
       setLoadingAudit(false);
     }
   }, []);
 
-  useEffect(()=>{ loadAudit(date); }, [date]);
+  useEffect(()=>{
+    const ctrl = new AbortController();
+    loadAudit(date, ctrl.signal);
+    return () => ctrl.abort();
+  }, [date]);
 
   const rows = records.filter(e=>{
     const qq=q.toLowerCase();

@@ -17,31 +17,45 @@ const App = () => {
   const [dateFrom,setDateFrom] = useState(today());
   const [dateTo,setDateTo]     = useState(today());
 
+  /* ── Fetch helper ── */
+  const apiFetch = async (url, opts={}) => {
+    const r = await fetch(url, opts);
+    if (!r.ok) throw new Error(`${opts.method||'GET'} ${url} → ${r.status}`);
+    return r;
+  };
+
   /* ── Loaders ── */
   const loadSummary = useCallback(async (from,to) => {
-    const r = await fetch(`/report/summary?start=${from}&end=${to}`);
-    const d = await r.json();
-    setSummary(d);
-    setUpdatedAt(new Date().toLocaleTimeString('zh-TW'));
+    try {
+      const r = await apiFetch(`/report/summary?start=${from}&end=${to}`);
+      setSummary(await r.json());
+      setUpdatedAt(new Date().toLocaleTimeString('zh-TW'));
+    } catch(e) { console.error('loadSummary:', e); }
   }, []);
 
   const loadEDL = useCallback(async () => {
-    const [pendRes,entRes] = await Promise.all([
-      fetch('/edl/pending').then(r=>r.json()),
-      fetch('/edl/entries').then(r=>r.json()),
-    ]);
-    setEdlPending(mapPending(pendRes.pending || []));
-    setEdlActive(mapEntries(entRes.entries || []));
+    try {
+      const [pendRes,entRes] = await Promise.all([
+        apiFetch('/edl/pending').then(r=>r.json()),
+        apiFetch('/edl/entries').then(r=>r.json()),
+      ]);
+      setEdlPending(mapPending(pendRes.pending || []));
+      setEdlActive(mapEntries(entRes.entries || []));
+    } catch(e) { console.error('loadEDL:', e); }
   }, []);
 
   const loadWhitelist = useCallback(async () => {
-    const d = await fetch('/whitelist/stats').then(r=>r.json());
-    setWhitelist(mapWhitelist(d.rules || []));
+    try {
+      const d = await apiFetch('/whitelist/stats').then(r=>r.json());
+      setWhitelist(mapWhitelist(d.rules || []));
+    } catch(e) { console.error('loadWhitelist:', e); }
   }, []);
 
   const loadBlacklist = useCallback(async () => {
-    const d = await fetch('/blacklist/stats').then(r=>r.json());
-    setBlStats(d);
+    try {
+      const d = await apiFetch('/blacklist/stats').then(r=>r.json());
+      setBlStats(d);
+    } catch(e) { console.error('loadBlacklist:', e); }
   }, []);
 
   /* ── Initial load ── */
@@ -66,55 +80,65 @@ const App = () => {
 
   /* ── EDL operations ── */
   const edlApprove = async (token) => {
-    await fetch(`/edl/approve/${token}`);
+    try { await apiFetch(`/edl/approve/${token}`); } catch(e) { console.error('edlApprove:', e); }
     await loadEDL();
   };
   const edlReject = async (token) => {
-    await fetch(`/edl/reject/${token}`);
+    try { await apiFetch(`/edl/reject/${token}`); } catch(e) { console.error('edlReject:', e); }
     await loadEDL();
   };
   const edlEditTTL = async (value, days) => {
-    await fetch(`/edl/entry/${encodeURIComponent(value)}`, {
-      method: 'PATCH',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ttl_days: days}),
-    });
+    try {
+      await apiFetch(`/edl/entry/${encodeURIComponent(value)}`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ttl_days: days}),
+      });
+    } catch(e) { console.error('edlEditTTL:', e); }
     await loadEDL();
   };
 
   /* ── Whitelist operations ── */
   const wlAdd = async (data) => {
-    await fetch('/whitelist/rule/direct', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data),
-    });
+    try {
+      await apiFetch('/whitelist/rule/direct', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(data),
+      });
+    } catch(e) { console.error('wlAdd:', e); }
     await loadWhitelist();
   };
   const wlEdit = async (data) => {
-    await fetch('/whitelist/rule/direct', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data),
-    });
+    try {
+      // Delete by original sig_id first to avoid duplicates when sig_id changes
+      if (data.id) await fetch(`/whitelist/rule/${data.id}`, {method:'DELETE'});
+      await apiFetch('/whitelist/rule/direct', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(data),
+      });
+    } catch(e) { console.error('wlEdit:', e); }
     await loadWhitelist();
   };
   const wlDel = async (id) => {
-    await fetch(`/whitelist/rule/${id}`, {method:'DELETE'});
+    try { await apiFetch(`/whitelist/rule/${id}`, {method:'DELETE'}); } catch(e) { console.error('wlDel:', e); }
     await loadWhitelist();
   };
   const wlReload = async () => {
-    await fetch('/whitelist/reload', {method:'POST'});
+    try { await apiFetch('/whitelist/reload', {method:'POST'}); } catch(e) { console.error('wlReload:', e); }
     await loadWhitelist();
   };
 
   /* ── Cross-page event actions ── */
   const addEDLFromEvent = async (e) => {
-    await fetch('/edl/entry', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({value: e.src_ip, note: `${e.sig_name} (${e.sig_id})`}),
-    });
+    try {
+      await apiFetch('/edl/entry', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({value: e.src_ip, note: `${e.sig_name} (${e.sig_id})`}),
+      });
+    } catch(e2) { console.error('addEDLFromEvent:', e2); }
     await loadEDL();
     setPage('edl');
   };

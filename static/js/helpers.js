@@ -46,7 +46,10 @@ const NAV_GROUPS = [
 /* ── TYPE DETECTION ── */
 const detectType = v => {
   if (!v) return 'ip';
-  if (/^[\d.]+\/\d+$/.test(v) || /^[\d.]+$/.test(v) || /^[\da-f:]+$/i.test(v)) return 'ip';
+  if (/^[\d.]+\/\d+$/.test(v)) return 'ip';               // IPv4 CIDR
+  if (/^[\d.]+$/.test(v)) return 'ip';                    // IPv4
+  if (/^[\da-f:]+\/\d+$/i.test(v)) return 'ip';           // IPv6 CIDR
+  if (/^([\da-f]{0,4}:){2,7}[\da-f]{0,4}$/i.test(v)) return 'ip'; // IPv6
   if (/^https?:\/\//.test(v)) return 'url';
   return 'domain';
 };
@@ -117,6 +120,7 @@ const computeStats = (summary, edlPending) => ({
 const computeActionDist = (summary) => {
   const ac    = summary?.action_counts || {};
   const total = summary?.total_events  || 1;
+  const safeTotal = total > 0 ? total : 1;
   return [
     {action:'Block',      key:'block',       color:'var(--c-block)'},
     {action:'Investigate',key:'investigate', color:'var(--c-investigate)'},
@@ -124,7 +128,7 @@ const computeActionDist = (summary) => {
     {action:'Suppress',   key:'suppress',    color:'var(--c-suppress)'},
   ].map(({action,key,color}) => {
     const count = ac[key] || 0;
-    return {action, count, pct: (count/total*100).toFixed(1), color};
+    return {action, count, pct: (count/safeTotal*100).toFixed(1), color};
   });
 };
 

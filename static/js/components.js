@@ -226,8 +226,10 @@ const EventDetail = ({event,onClose,onAddWhitelist,onAddEDL}) => {
 
 /* ── WHITELIST MODAL ── */
 const WLModal = ({initial,onSave,onClose}) => {
-  const [f,setF]=useState(initial||{sig_id:'',sig_name:'',action:'alert',src_ip:'',dst_ip:'',note:'',status:'monitoring',ttl_days:'90'});
+  const blank = {sig_id:'',sig_name:'',action:'alert',src_ip:'',dst_ip:'',note:'',status:'monitoring',ttl_days:'90'};
+  const [f,setF]=useState(initial||blank);
   const s=k=>v=>setF(prev=>({...prev,[k]:v}));
+  useEffect(()=>{ setF(initial||blank); }, [initial?.id]);
   return (
     <Modal title={initial?.id?'編輯白名單規則':'新增白名單規則'} onClose={onClose} width={560}>
       <div style={{display:'flex',flexDirection:'column',gap:14}}>
