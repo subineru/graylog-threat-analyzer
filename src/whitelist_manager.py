@@ -204,6 +204,11 @@ class WhitelistManager:
             snapshot = list(self._rules)
 
         tmp_path = self._csv_path + ".tmp"
+        snapshot.sort(key=lambda r: (
+            r.signature_id,
+            self._networks_to_str(r.source_networks),
+            self._networks_to_str(r.destination_networks),
+        ))
         with open(tmp_path, "w", encoding="utf-8", newline="") as f:
             f.write("# 已知誤判清單 — 由 WhitelistManager 自動維護，可直接編輯後 POST /whitelist/reload\n")
             writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
