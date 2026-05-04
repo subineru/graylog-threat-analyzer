@@ -143,7 +143,8 @@ const App = () => {
     setPage('edl');
   };
   const addWLFromEvent = async (e) => {
-    await wlAdd({sig_id:e.sig_id,sig_name:e.sig_name,action:e.action,src_ip:e.src_ip,dst_ip:'',note:`從事件 ${e.id} 標記`,status:'monitoring',ttl_days:90});
+    const src = (e.src_ip && e.src_ip !== '—') ? e.src_ip : '';
+    await wlAdd({sig_id:e.sig_id,sig_name:e.sig_name,action:'',src_ip:src,dst_ip:'',note:`從事件 ${e.id} 標記`,status:'monitoring',ttl_days:90});
     setPage('whitelist');
   };
 

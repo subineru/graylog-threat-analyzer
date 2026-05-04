@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from .edl_manager import EDLManager
+from .whitelist_manager import WhitelistManager
 from .enrichment import EnrichmentService
 from .notifier import EmailNotifier
 from .report_generator import generate_pptx
@@ -362,6 +363,7 @@ async def whitelist_approve(token: str, request: Request):
 async def whitelist_add_direct(request: Request, body: dict = Body(...)):
     """從 Dashboard 直接新增白名單規則（suggest + 立即 approve，不需 email token）。"""
     wl = request.app.state.triage.whitelist
+    ttl_raw = body.get("ttl_days")
     token = wl.suggest_rule(
         sig_id=body.get("sig_id", ""),
         sig_name=body.get("sig_name", ""),
@@ -369,6 +371,7 @@ async def whitelist_add_direct(request: Request, body: dict = Body(...)):
         src_ip=body.get("src_ip", ""),
         dst_ip=body.get("dst_ip", ""),
         note=body.get("note", "Marked as FP from Dashboard"),
+        ttl_days=int(ttl_raw) if isinstance(ttl_raw, (int, float)) else None,
     )
     ok, msg = await wl.approve_rule(token)
     if not ok:
@@ -404,6 +407,10 @@ async def whitelist_stats(request: Request):
         rules.append({
             "signature_id": rule.signature_id,
             "signature_name": rule.signature_name,
+            "source_ip":      WhitelistManager._networks_to_str(rule.source_networks),
+            "destination_ip": WhitelistManager._networks_to_str(rule.destination_networks),
+            "action":         ", ".join(sorted(rule.actions)) if rule.actions else "",
+            "ttl_days":       rule.expiry.ttl_days,
             "note": rule.note,
             "status": rule.status,
             "hit_count": rule.hit_count,
