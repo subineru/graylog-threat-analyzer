@@ -13,6 +13,7 @@ Whitelist Manager 單元測試
 import asyncio
 import ipaddress
 import os
+from datetime import datetime, timezone
 import tempfile
 
 import pytest
@@ -350,5 +351,78 @@ class TestRemoveRule:
                 wl.remove_rule("99999", src_ip="1.2.3.4", dst_ip="")
             )
             assert not ok
+        finally:
+            _teardown(path)
+
+
+# ---------------------------------------------------------------------------
+# sweep — status-aware expiry
+# ---------------------------------------------------------------------------
+
+class TestSweepStatus:
+    """
+    Confirmed rules must survive sweep regardless of TTL expiry.
+    Monitoring rules are swept normally when expired.
+    """
+
+    def _expired_rule(self, sig_id, status):
+        from src.whitelist_manager import FPRule
+        from datetime import timedelta
+        last = datetime.now(timezone.utc) - timedelta(days=200)
+        return FPRule(
+            signature_id=sig_id,
+            signature_name=f"Sig {sig_id}",
+            actions=set(),
+            source_networks=[],
+            destination_networks=[],
+            note="",
+            status=status,
+            expiry=ExpiryPolicy(ttl_days=90, last_activity=last),
+            hit_count=1,
+        )
+
+    def test_confirmed_rule_survives_sweep(self):
+        """confirmed rules must never be removed by sweep, even when TTL would expire."""
+        wl, path = _make_manager()
+        try:
+            wl._rules = [self._expired_rule("11111", "confirmed")]
+            removed = asyncio.get_event_loop().run_until_complete(wl.sweep())
+            assert removed == 0
+            assert any(r.signature_id == "11111" for r in wl._rules)
+        finally:
+            _teardown(path)
+
+    def test_monitoring_rule_swept_when_expired(self):
+        """monitoring rules are removed by sweep when their TTL window has passed."""
+        wl, path = _make_manager()
+        try:
+            wl._rules = [self._expired_rule("22222", "monitoring")]
+            removed = asyncio.get_event_loop().run_until_complete(wl.sweep())
+            assert removed == 1
+            assert not any(r.signature_id == "22222" for r in wl._rules)
+        finally:
+            _teardown(path)
+
+    def test_mixed_rules_sweep_only_expired_monitoring(self):
+        """Only expired monitoring rules are removed; confirmed and unexpired are kept."""
+        wl, path = _make_manager()
+        try:
+            from src.whitelist_manager import FPRule
+            fresh = FPRule(
+                signature_id="33333", signature_name="Fresh", actions=set(),
+                source_networks=[], destination_networks=[], note="",
+                status="monitoring",
+                expiry=ExpiryPolicy(ttl_days=90, last_activity=datetime.now(timezone.utc)),
+                hit_count=1,
+            )
+            wl._rules = [
+                self._expired_rule("11111", "confirmed"),   # keep
+                self._expired_rule("22222", "monitoring"),  # sweep
+                fresh,                                       # keep (not expired)
+            ]
+            removed = asyncio.get_event_loop().run_until_complete(wl.sweep())
+            assert removed == 1
+            remaining_ids = {r.signature_id for r in wl._rules}
+            assert remaining_ids == {"11111", "33333"}
         finally:
             _teardown(path)

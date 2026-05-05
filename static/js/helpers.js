@@ -78,14 +78,21 @@ const mapWhitelist = (list=[]) => list.map(r => ({
   id:        r.signature_id,
   sig_id:    r.signature_id,
   sig_name:  r.signature_name,
-  action:    r.action         || '',
-  src_ip:    r.source_ip      || '',
-  dst_ip:    r.destination_ip || '',
-  note:      r.note           || '',
-  status:    r.status         || 'monitoring',
-  ttl_days:  r.ttl_days != null ? r.ttl_days : -1,
-  hit_count: r.hit_count || 0,
-  last_hit:  r.last_hit_time || new Date().toISOString(),
+  action:     r.action         || '',
+  src_ip:     r.source_ip      || '',
+  dst_ip:     r.destination_ip || '',
+  note:       r.note           || '',
+  status:     r.status         || 'monitoring',
+  ttl_days:   r.ttl_days != null ? r.ttl_days : -1,
+  hit_count:  r.hit_count || 0,
+  last_hit:   r.last_hit_time || null,
+  expires_at: (() => {
+    if (r.status === 'confirmed' || r.ttl_days === -1) return null;
+    if (!r.last_hit_time) return null;
+    const d = new Date(r.last_hit_time);
+    d.setDate(d.getDate() + (r.ttl_days ?? 90));
+    return d.toISOString().slice(0, 10);
+  })(),
 }));
 
 const mapEvents = (summary) => {

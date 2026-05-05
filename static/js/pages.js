@@ -264,7 +264,9 @@ const WhitelistPage = ({rules,onAdd,onEdit,onDelete,onReload}) => {
                     <TD style={{fontFamily:'var(--mono)',fontSize:11,color:'var(--text-sub)'}}>{r.dst_ip||<span style={{color:'#94a3b8'}}>*</span>}</TD>
                     <TD style={{fontSize:11,color:'var(--text-muted)',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.note}</TD>
                     <TD><Pill bg={r.status==='confirmed'?'#dcfce7':'#fef3c7'} color={r.status==='confirmed'?'var(--green)':'var(--yellow)'}>{r.status}</Pill></TD>
-                    <TD style={{fontFamily:'var(--mono)',fontSize:11,fontWeight:600,color:r.ttl_days===-1?'var(--blue)':'var(--text)'}}>{r.ttl_days===-1?'∞':r.ttl_days+'d'}</TD>
+                    <TD style={{fontFamily:'var(--mono)',fontSize:11,fontWeight:600,color:(r.ttl_days===-1||r.status==='confirmed')?'var(--blue)':'var(--text)'}}>
+                      {(r.ttl_days===-1||r.status==='confirmed') ? '∞' : r.expires_at ? r.expires_at : '尚未命中'}
+                    </TD>
                     <TD style={{fontFamily:'var(--mono)',fontWeight:700,color:r.hit_count>100?'var(--green)':'var(--text)'}}>{(r.hit_count||0).toLocaleString()}</TD>
                     <TD style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{r.last_hit?fmt(r.last_hit):'—'}</TD>
                     <TD>
@@ -280,7 +282,7 @@ const WhitelistPage = ({rules,onAdd,onEdit,onDelete,onReload}) => {
         }
       </div>
       <div style={{display:'flex',gap:16,padding:'10px 16px',background:'#fff',border:'1px solid var(--border)',borderRadius:6,fontSize:12,flexWrap:'wrap'}}>
-        {[['共',rules.length,'條規則','var(--text)'],['總命中',rules.reduce((s,r)=>s+(r.hit_count||0),0).toLocaleString(),'次','var(--text)'],['永久',rules.filter(r=>r.ttl_days===-1).length,'條','var(--blue)'],['觀察中',rules.filter(r=>r.status==='monitoring').length,'條','var(--yellow)']].map(([pre,val,suf,c])=>(
+        {[['共',rules.length,'條規則','var(--text)'],['總命中',rules.reduce((s,r)=>s+(r.hit_count||0),0).toLocaleString(),'次','var(--text)'],['永久',rules.filter(r=>r.ttl_days===-1||r.status==='confirmed').length,'條','var(--blue)'],['觀察中',rules.filter(r=>r.status==='monitoring').length,'條','var(--yellow)']].map(([pre,val,suf,c])=>(
           <span key={pre} style={{color:'var(--text-muted)'}}>{pre} <strong style={{color:c}}>{val}</strong> {suf}</span>
         ))}
       </div>
