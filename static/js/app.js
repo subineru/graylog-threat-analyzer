@@ -89,10 +89,10 @@ const App = () => {
   };
   const edlEditTTL = async (value, days) => {
     try {
-      await apiFetch(`/edl/entry/${encodeURIComponent(value)}`, {
+      await apiFetch('/edl/entry', {
         method: 'PATCH',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ttl_days: days}),
+        body: JSON.stringify({value, ttl_days: days}),
       });
     } catch(e) { console.error('edlEditTTL:', e); }
     await loadEDL();

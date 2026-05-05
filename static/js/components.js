@@ -244,7 +244,7 @@ const WLModal = ({initial,onSave,onClose}) => {
         </div>
         <FF label="備註"><FI value={f.note} onChange={s('note')} placeholder="說明此規則用途"/></FF>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-          <FF label="狀態"><FS value={f.status} onChange={v=>setF(p=>({...p,status:v,...(v==='confirmed'?{ttl_days:'-1'}:{})}))} options={[['monitoring','monitoring'],['confirmed','confirmed']]}/></FF>
+          <FF label="狀態"><FS value={f.status} onChange={v=>setF(p=>({...p,status:v,...(v==='confirmed'?{ttl_days:'-1'}:{ttl_days:p.ttl_days==='-1'?'90':p.ttl_days})}))} options={[['monitoring','monitoring'],['confirmed','confirmed']]}/></FF>
           <FF label="TTL（天，-1=永不過期）"><FI value={String(f.ttl_days)} onChange={s('ttl_days')} placeholder="90" mono type="number" disabled={f.status==='confirmed'}/></FF>
         </div>
         <div style={{display:'flex',justifyContent:'flex-end',gap:10,paddingTop:8,borderTop:'1px solid var(--border)'}}>

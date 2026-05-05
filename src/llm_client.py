@@ -229,7 +229,7 @@ class LLMClient:
             "{severity}": summary.get("severity", ""),
             "{action}": summary.get("action", ""),
             "{source_ip}": summary.get("source_ip", ""),
-            "{source_user}": summary.get("source_user", ""),
+            "{source_user}": summary.get("source_user_name", ""),
             "{destination_ip}": summary.get("destination_ip", ""),
             "{destination_user}": summary.get("destination_user", ""),
             "{protocol}": summary.get("protocol", ""),

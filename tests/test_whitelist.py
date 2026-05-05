@@ -223,7 +223,7 @@ class TestTtlDaysPropagation:
             )
             assert wl._pending_rules[token]["ttl_days"] == 180
 
-            ok, _ = asyncio.get_event_loop().run_until_complete(wl.approve_rule(token))
+            ok, _ = asyncio.run(wl.approve_rule(token))
             assert ok
             assert wl._rules[-1].expiry.ttl_days == 180
         finally:
@@ -236,7 +236,7 @@ class TestTtlDaysPropagation:
                 sig_id="12345", sig_name="Test", action="",
                 ttl_days=None,
             )
-            ok, _ = asyncio.get_event_loop().run_until_complete(wl.approve_rule(token))
+            ok, _ = asyncio.run(wl.approve_rule(token))
             assert ok
             assert wl._rules[-1].expiry.ttl_days == wl._default_ttl_days
         finally:
@@ -249,7 +249,7 @@ class TestTtlDaysPropagation:
                 sig_id="12345", sig_name="Test", action="",
                 ttl_days=-1,
             )
-            ok, _ = asyncio.get_event_loop().run_until_complete(wl.approve_rule(token))
+            ok, _ = asyncio.run(wl.approve_rule(token))
             assert ok
             rule = wl._rules[-1]
             assert rule.expiry.ttl_days == -1
@@ -272,7 +272,7 @@ class TestApproveRuleDedup:
 
     def _approve(self, wl, sig_id, src_ip="", dst_ip=""):
         token = wl.suggest_rule(sig_id=sig_id, sig_name=f"Sig {sig_id}", action="", src_ip=src_ip, dst_ip=dst_ip)
-        return asyncio.get_event_loop().run_until_complete(wl.approve_rule(token))
+        return asyncio.run(wl.approve_rule(token))
 
     def test_approve_same_rule_twice_keeps_one(self):
         """Approving identical (sig_id, src_ip, dst_ip) twice → only one rule survives."""
@@ -311,10 +311,9 @@ class TestRemoveRule:
 
     def _load_two_rules(self, wl):
         """Approve two rules for sig 39154 with different src IPs."""
-        loop = asyncio.get_event_loop()
         for src in ("192.168.1.1", "192.168.2.2"):
             token = wl.suggest_rule(sig_id="39154", sig_name="Test", action="", src_ip=src)
-            loop.run_until_complete(wl.approve_rule(token))
+            asyncio.run(wl.approve_rule(token))
 
     def test_remove_by_compound_key_leaves_other_rule(self):
         """Deleting one (sig_id, src_ip) pair must not remove sibling rules."""
@@ -323,9 +322,7 @@ class TestRemoveRule:
             self._load_two_rules(wl)
             assert len([r for r in wl._rules if r.signature_id == "39154"]) == 2
 
-            ok = asyncio.get_event_loop().run_until_complete(
-                wl.remove_rule("39154", src_ip="192.168.1.1", dst_ip="")
-            )
+            ok = asyncio.run(wl.remove_rule("39154", src_ip="192.168.1.1", dst_ip=""))
             assert ok
             remaining = [r for r in wl._rules if r.signature_id == "39154"]
             assert len(remaining) == 1
@@ -338,7 +335,7 @@ class TestRemoveRule:
         wl, path = _make_manager()
         try:
             self._load_two_rules(wl)
-            ok = asyncio.get_event_loop().run_until_complete(wl.remove_rule("39154"))
+            ok = asyncio.run(wl.remove_rule("39154"))
             assert ok
             assert not any(r.signature_id == "39154" for r in wl._rules)
         finally:
@@ -347,9 +344,7 @@ class TestRemoveRule:
     def test_remove_nonexistent_returns_false(self):
         wl, path = _make_manager()
         try:
-            ok = asyncio.get_event_loop().run_until_complete(
-                wl.remove_rule("99999", src_ip="1.2.3.4", dst_ip="")
-            )
+            ok = asyncio.run(wl.remove_rule("99999", src_ip="1.2.3.4", dst_ip=""))
             assert not ok
         finally:
             _teardown(path)
@@ -386,7 +381,7 @@ class TestSweepStatus:
         wl, path = _make_manager()
         try:
             wl._rules = [self._expired_rule("11111", "confirmed")]
-            removed = asyncio.get_event_loop().run_until_complete(wl.sweep())
+            removed = asyncio.run(wl.sweep())
             assert removed == 0
             assert any(r.signature_id == "11111" for r in wl._rules)
         finally:
@@ -397,7 +392,7 @@ class TestSweepStatus:
         wl, path = _make_manager()
         try:
             wl._rules = [self._expired_rule("22222", "monitoring")]
-            removed = asyncio.get_event_loop().run_until_complete(wl.sweep())
+            removed = asyncio.run(wl.sweep())
             assert removed == 1
             assert not any(r.signature_id == "22222" for r in wl._rules)
         finally:
@@ -420,7 +415,7 @@ class TestSweepStatus:
                 self._expired_rule("22222", "monitoring"),  # sweep
                 fresh,                                       # keep (not expired)
             ]
-            removed = asyncio.get_event_loop().run_until_complete(wl.sweep())
+            removed = asyncio.run(wl.sweep())
             assert removed == 1
             remaining_ids = {r.signature_id for r in wl._rules}
             assert remaining_ids == {"11111", "33333"}
