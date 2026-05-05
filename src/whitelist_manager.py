@@ -247,6 +247,7 @@ class WhitelistManager:
         dst_ip: str = "",
         note: str = "",
         ttl_days: int | None = None,
+        status: str = "monitoring",
     ) -> str:
         """Register a pending whitelist rule and return a one-time approval token."""
         # Extract numeric ID from "Name(ID)" format if needed
@@ -260,6 +261,7 @@ class WhitelistManager:
             "dst_ip": dst_ip,
             "note": note or f"由 Email 核准：{date.today()}",
             "ttl_days": ttl_days,
+            "status": status,
             "suggested_at": datetime.now(timezone.utc).isoformat(),
         }
         return token
@@ -302,7 +304,7 @@ class WhitelistManager:
             source_networks=self._parse_networks(rule_data["src_ip"]),
             destination_networks=self._parse_networks(rule_data["dst_ip"]),
             note=rule_data["note"],
-            status="monitoring",
+            status=rule_data.get("status", "monitoring"),
             expiry=ExpiryPolicy(ttl_days=ttl_days, last_activity=None),
             hit_count=0,
         )

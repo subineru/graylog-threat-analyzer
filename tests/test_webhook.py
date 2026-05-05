@@ -441,7 +441,7 @@ class TestWhitelistManager:
         csv_content = (
             "signature_id,signature_name,action,source_ip,destination_ip,"
             "note,status,ttl_days,last_hit_time,hit_count\n"
-            f"92322,NTLMSSP,alert,,,stale rule,confirmed,30,{old_ts},5\n"
+            f"92322,NTLMSSP,alert,,,stale rule,monitoring,30,{old_ts},5\n"
         )
         csv_file = tmp_path / "wl_stale.csv"
         csv_file.write_text(csv_content, encoding="utf-8")

@@ -60,18 +60,21 @@ class EDLEntry:
         return self.expiry.is_expired()
 
     @property
-    def expires_at(self) -> datetime:
+    def expires_at(self) -> datetime | None:
+        if self.expiry.ttl_days == -1:
+            return None
         from datetime import timedelta
-        if self.expiry.last_activity is None:
-            return datetime.fromisoformat(self.added_at) + timedelta(days=self.expiry.ttl_days)
-        return self.expiry.last_activity + timedelta(days=self.expiry.ttl_days)
+        base = self.expiry.last_activity or datetime.fromisoformat(self.added_at)
+        return base + timedelta(days=self.expiry.ttl_days)
 
     def to_dict(self) -> dict:
+        ea = self.expires_at
         return {
             "value":            self.value,
             "added_at":         self.added_at,
             "ttl_days":         self.expiry.ttl_days,
             "last_activity":    self.expiry.last_activity.isoformat() if self.expiry.last_activity else None,
+            "expires_at":       ea.isoformat() if ea else None,
             "entry_type":       self.entry_type,
             "source_signature": self.source_signature,
             "source_event_id":  self.source_event_id,
@@ -245,6 +248,11 @@ class EDLManager:
 
     def suggest_entry(self, value: str, source_event: dict | None = None) -> str:
         """Queue an EDL entry for human approval. Returns confirmation token."""
+        existing_active = next((e for e in self._entries if e.value == value and not e.is_expired), None)
+        if existing_active:
+            logger.info(f"EDL suggest_entry: {value} already active, returning sentinel token.")
+            return f"already-active:{value}"
+
         for entry in self._pending:
             if entry.value == value and entry.status == "pending":
                 logger.info(f"EDL pending entry already exists for {value}, reusing token.")
@@ -263,6 +271,9 @@ class EDLManager:
 
     def approve_entry(self, token: str) -> tuple[bool, str]:
         """Approve a pending entry and write it to the EDL."""
+        if token.startswith("already-active:"):
+            value = token[len("already-active:"):]
+            return False, f"{value} 已存在於 EDL 封鎖清單中，無需重複加入。"
         for entry in self._pending:
             if entry.token == token:
                 if entry.status == "approved":

@@ -296,17 +296,20 @@ async def edl_list_pending(request: Request):
     return {"pending": edl_mgr.list_pending()}
 
 
-@app.patch("/edl/entry/{value:path}")
+@app.patch("/edl/entry")
 async def edl_update_ttl(
-    value: str,
     request: Request,
-    ttl_days: int = Body(..., embed=True),
+    body: dict = Body(...),
 ):
     """
     動態修改 EDL entry 的 TTL（per-entry）。
-    ttl_days = -1 表示永不過期。
+    Body: {"value": "...", "ttl_days": N}  ttl_days = -1 表示永不過期。
     """
-    if ttl_days != -1 and ttl_days <= 0:
+    value = body.get("value", "")
+    ttl_days = body.get("ttl_days")
+    if not value:
+        raise HTTPException(status_code=422, detail="value 為必填欄位")
+    if not isinstance(ttl_days, int) or (ttl_days != -1 and ttl_days <= 0):
         raise HTTPException(status_code=422, detail="ttl_days 必須為正整數或 -1（永不過期）")
     edl_mgr = request.app.state.edl
     ok = edl_mgr.update_entry_ttl(value, ttl_days)
@@ -372,6 +375,7 @@ async def whitelist_add_direct(request: Request, body: dict = Body(...)):
         dst_ip=body.get("dst_ip", ""),
         note=body.get("note", "Marked as FP from Dashboard"),
         ttl_days=int(ttl_raw) if isinstance(ttl_raw, (int, float)) else None,
+        status=body.get("status", "monitoring"),
     )
     ok, msg = await wl.approve_rule(token)
     if not ok:
