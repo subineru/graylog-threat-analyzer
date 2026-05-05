@@ -14,9 +14,9 @@ const DashboardPage = ({stats,setPage,edlPending,whitelist,actionDist,dailyData,
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:14,padding:'16px 20px'}}>
         {[
           {label:'TOTAL EVENTS',    val:stats.total_events.toLocaleString(), sub:'Events processed in period', valColor:'var(--text)'},
-          {label:'BLOCKED',         val:stats.blocked,                        sub:'Confirmed threats (EDL candidates)', valColor:'var(--red)'},
+          {label:'BLOCKED',         val:stats.blocked,                        sub:'目前 EDL 封鎖條目',     valColor:'var(--red)'},
           {label:'SUPPRESSION RATE',val:stats.suppression_rate+'%',           sub:'Auto-handled without alert', valColor:'var(--green)'},
-          {label:'PENDING REVIEW',  val:stats.pending_review,                 sub:'Monitor + Investigate items', valColor:'var(--orange)'},
+          {label:'白名單規則',       val:whitelist.length,                     sub:'已知誤判白名單規則數',  valColor:'var(--blue)'},
         ].map(k=>(
           <div key={k.label} style={{background:'#fff',border:'1px solid var(--border)',borderRadius:6,padding:'18px 20px',display:'flex',flexDirection:'column',gap:6}}>
             <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.07em'}}>{k.label}</div>
@@ -235,10 +235,21 @@ const WhitelistPage = ({rules,onAdd,onEdit,onDelete,onReload}) => {
   const [modal,setModal]=useState(false);
   const [editTarget,setEditTarget]=useState(null);
   const [reloading,setReloading]=useState(false);
+  const [sortKey,setSortKey]=useState('sig_id');
+  const [sortDir,setSortDir]=useState('asc');
   const filtered=rules.filter(r=>{
     const qq=q.toLowerCase();
     return !qq||(r.sig_name||'').toLowerCase().includes(qq)||(r.sig_id||'').includes(qq)||(r.src_ip||'').includes(qq)||(r.dst_ip||'').includes(qq)||(r.note||'').toLowerCase().includes(qq);
   });
+  const toggleSort=key=>{if(sortKey===key)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortKey(key);setSortDir('asc');}};
+  const sorted=[...filtered].sort((a,b)=>{
+    let av=a[sortKey],bv=b[sortKey];
+    if(sortKey==='hit_count'||sortKey==='ttl_days'){av=av??-Infinity;bv=bv??-Infinity;return sortDir==='asc'?av-bv:bv-av;}
+    if(sortKey==='last_hit'){av=av?new Date(av).getTime():0;bv=bv?new Date(bv).getTime():0;return sortDir==='asc'?av-bv:bv-av;}
+    av=(av||'').toLowerCase();bv=(bv||'').toLowerCase();return sortDir==='asc'?av.localeCompare(bv):bv.localeCompare(av);
+  });
+  const SI=({col})=>sortKey!==col?React.createElement('span',{style:{opacity:.3,marginLeft:3,fontSize:9}},'⇅'):React.createElement('span',{style:{marginLeft:3,fontSize:9}},sortDir==='asc'?'▲':'▼');
+  const SH=({col,children})=>React.createElement(TH,{style:{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'},onClick:()=>toggleSort(col)},children,React.createElement(SI,{col}));
   const doReload=async()=>{setReloading(true);try{await onReload();}finally{setReloading(false);}};
   return (
     <div style={{padding:20,display:'flex',flexDirection:'column',gap:12}}>
@@ -253,9 +264,9 @@ const WhitelistPage = ({rules,onAdd,onEdit,onDelete,onReload}) => {
         {rules.length===0
           ? <div style={{padding:40,textAlign:'center',color:'var(--text-muted)',fontSize:13}}>無白名單規則</div>
           : <table style={{width:'100%',borderCollapse:'collapse'}}>
-              <thead><tr><TH>Sig ID</TH><TH>Signature 名稱</TH><TH>動作</TH><TH>來源 IP</TH><TH>目的 IP</TH><TH>備註</TH><TH>狀態</TH><TH>TTL</TH><TH>命中</TH><TH>最後命中</TH><TH></TH></tr></thead>
+              <thead><tr><SH col="sig_id">Sig ID</SH><SH col="sig_name">Signature 名稱</SH><SH col="action">動作</SH><SH col="src_ip">來源 IP</SH><SH col="dst_ip">目的 IP</SH><TH>備註</TH><SH col="status">狀態</SH><SH col="ttl_days">TTL</SH><SH col="hit_count">命中</SH><SH col="last_hit">最後命中</SH><TH></TH></tr></thead>
               <tbody>
-                {filtered.map((r,i)=>(
+                {sorted.map((r,i)=>(
                   <tr key={`${r.id}_${i}`} style={{background:i%2?'#f8fafc':'#fff'}}>
                     <TD style={{fontFamily:'var(--mono)',fontSize:11,color:'var(--blue)',fontWeight:600}}>{r.sig_id}</TD>
                     <TD style={{maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.sig_name}</TD>
