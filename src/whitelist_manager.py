@@ -189,10 +189,13 @@ class WhitelistManager:
         return None
 
     async def sweep(self) -> int:
-        """Remove rules whose TTL has expired. Returns count removed."""
+        """Remove expired monitoring rules. Confirmed rules are never swept."""
         async with self._lock:
             before = len(self._rules)
-            self._rules = [r for r in self._rules if not r.expiry.is_expired()]
+            self._rules = [
+                r for r in self._rules
+                if r.status == 'confirmed' or not r.expiry.is_expired()
+            ]
             removed = before - len(self._rules)
         if removed:
             logger.info(f"Whitelist sweep: removed {removed} stale rules")
