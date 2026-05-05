@@ -296,3 +296,59 @@ class TestApproveRuleDedup:
             assert src_ips == {"192.168.1.1", "192.168.2.2"}
         finally:
             _teardown(path)
+
+
+# ---------------------------------------------------------------------------
+# remove_rule — compound-key precision
+# ---------------------------------------------------------------------------
+
+class TestRemoveRule:
+    """
+    Regression: remove_rule used to delete ALL rules with the same sig_id.
+    Fix: when src_ip/dst_ip are provided, only the exact matching rule is removed.
+    """
+
+    def _load_two_rules(self, wl):
+        """Approve two rules for sig 39154 with different src IPs."""
+        loop = asyncio.get_event_loop()
+        for src in ("192.168.1.1", "192.168.2.2"):
+            token = wl.suggest_rule(sig_id="39154", sig_name="Test", action="", src_ip=src)
+            loop.run_until_complete(wl.approve_rule(token))
+
+    def test_remove_by_compound_key_leaves_other_rule(self):
+        """Deleting one (sig_id, src_ip) pair must not remove sibling rules."""
+        wl, path = _make_manager()
+        try:
+            self._load_two_rules(wl)
+            assert len([r for r in wl._rules if r.signature_id == "39154"]) == 2
+
+            ok = asyncio.get_event_loop().run_until_complete(
+                wl.remove_rule("39154", src_ip="192.168.1.1", dst_ip="")
+            )
+            assert ok
+            remaining = [r for r in wl._rules if r.signature_id == "39154"]
+            assert len(remaining) == 1
+            assert WhitelistManager._networks_to_str(remaining[0].source_networks) == "192.168.2.2"
+        finally:
+            _teardown(path)
+
+    def test_remove_without_ip_removes_all(self):
+        """Omitting src_ip/dst_ip falls back to removing all rules with that sig_id."""
+        wl, path = _make_manager()
+        try:
+            self._load_two_rules(wl)
+            ok = asyncio.get_event_loop().run_until_complete(wl.remove_rule("39154"))
+            assert ok
+            assert not any(r.signature_id == "39154" for r in wl._rules)
+        finally:
+            _teardown(path)
+
+    def test_remove_nonexistent_returns_false(self):
+        wl, path = _make_manager()
+        try:
+            ok = asyncio.get_event_loop().run_until_complete(
+                wl.remove_rule("99999", src_ip="1.2.3.4", dst_ip="")
+            )
+            assert not ok
+        finally:
+            _teardown(path)

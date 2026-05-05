@@ -270,7 +270,7 @@ const WhitelistPage = ({rules,onAdd,onEdit,onDelete,onReload}) => {
                     <TD>
                       <div style={{display:'flex',gap:4}}>
                         <Btn variant="icon" sm title="編輯" onClick={()=>{setEditTarget(r);setModal(true);}}><Icon n="edit" size={13} color="#94a3b8"/></Btn>
-                        <Btn variant="icon" sm title="刪除" onClick={()=>onDelete(r.id)}><Icon n="trash" size={13} color="#ef4444"/></Btn>
+                        <Btn variant="icon" sm title="刪除" onClick={()=>onDelete(r.id,r.src_ip,r.dst_ip)}><Icon n="trash" size={13} color="#ef4444"/></Btn>
                       </div>
                     </TD>
                   </tr>
@@ -284,7 +284,7 @@ const WhitelistPage = ({rules,onAdd,onEdit,onDelete,onReload}) => {
           <span key={pre} style={{color:'var(--text-muted)'}}>{pre} <strong style={{color:c}}>{val}</strong> {suf}</span>
         ))}
       </div>
-      {modal&&<WLModal initial={editTarget} onClose={()=>setModal(false)} onSave={data=>{editTarget?onEdit({...editTarget,...data}):onAdd(data);setModal(false);}}/>}
+      {modal&&<WLModal initial={editTarget} onClose={()=>setModal(false)} onSave={data=>{editTarget?onEdit({...editTarget,...data,_orig_src_ip:editTarget.src_ip,_orig_dst_ip:editTarget.dst_ip}):onAdd(data);setModal(false);}}/>}
     </div>
   );
 };

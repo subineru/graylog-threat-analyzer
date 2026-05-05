@@ -261,15 +261,28 @@ class WhitelistManager:
         }
         return token
 
-    async def remove_rule(self, signature_id: str) -> bool:
-        """Remove all rules matching signature_id, write back CSV immediately."""
+    async def remove_rule(self, signature_id: str, src_ip: str = "", dst_ip: str = "") -> bool:
+        """Remove a specific rule by compound key (sig_id + src_ip + dst_ip).
+        When src_ip/dst_ip are omitted, falls back to removing all rules with that sig_id."""
         async with self._lock:
             before = len(self._rules)
-            self._rules = [r for r in self._rules if r.signature_id != signature_id]
+            if src_ip or dst_ip:
+                target_src = self._networks_to_str(self._parse_networks(src_ip))
+                target_dst = self._networks_to_str(self._parse_networks(dst_ip))
+                self._rules = [
+                    r for r in self._rules
+                    if not (
+                        r.signature_id == signature_id
+                        and self._networks_to_str(r.source_networks) == target_src
+                        and self._networks_to_str(r.destination_networks) == target_dst
+                    )
+                ]
+            else:
+                self._rules = [r for r in self._rules if r.signature_id != signature_id]
             if len(self._rules) == before:
                 return False
         await self.write_back()
-        logger.info(f"Whitelist rule removed: {signature_id}")
+        logger.info(f"Whitelist rule removed: {signature_id} src={src_ip!r} dst={dst_ip!r}")
         return True
 
     async def approve_rule(self, token: str) -> tuple[bool, str]:
