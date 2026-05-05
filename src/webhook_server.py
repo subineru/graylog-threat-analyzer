@@ -560,6 +560,10 @@ async def report_pptx(
     s, e = _parse_date_range(start, end)
     safe_audit: SafeAudit = request.app.state.safe_audit
     stats = safe_audit.aggregate(s, e)
+    edl_mgr = request.app.state.edl
+    wl = request.app.state.triage.whitelist
+    stats["edl_active_count"] = len(edl_mgr.list_entries())
+    stats["whitelist_count"]  = len(wl._rules)
     loop = asyncio.get_event_loop()
     pptx_bytes = await loop.run_in_executor(None, generate_pptx, stats)
     filename = f"threat_report_{s}_{e}.pptx"

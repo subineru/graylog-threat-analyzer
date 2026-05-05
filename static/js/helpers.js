@@ -116,9 +116,9 @@ const mapEvents = (summary) => {
 };
 
 /* ── COMPUTED STATS ── */
-const computeStats = (summary, edlPending) => ({
+const computeStats = (summary, edlPending, edlActive) => ({
   total_events:     summary?.total_events || 0,
-  blocked:          summary?.action_counts?.block || 0,
+  blocked:          (edlActive||[]).length,
   suppression_rate: summary?.suppression_rate || 0,
   pending_review:   (summary?.action_counts?.monitor||0) + (summary?.action_counts?.investigate||0),
   pending_edl:      edlPending.length,

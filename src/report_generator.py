@@ -192,17 +192,17 @@ def _slide_summary(prs: Presentation, stats: dict):
     slide = _add_slide(prs)
     _section_header(slide, "Executive Summary")
 
-    total   = stats.get("total_events", 0)
-    sup_rt  = stats.get("suppression_rate", 0)
-    ac      = stats.get("action_counts", {})
-    blocked = ac.get("block", 0)
-    pending = ac.get("monitor", 0) + ac.get("investigate", 0)
+    total    = stats.get("total_events", 0)
+    sup_rt   = stats.get("suppression_rate", 0)
+    ac       = stats.get("action_counts", {})
+    blocked  = stats.get("edl_active_count", ac.get("block", 0))
+    wl_count = stats.get("whitelist_count", 0)
 
     kpis = [
         ("Total Events",    str(total),           BLUE,    "Events processed in the period"),
-        ("Blocked",         str(blocked),          COL_RED, "Confirmed threats (block action)"),
+        ("EDL 封鎖條目",    str(blocked),          COL_RED, "Active EDL blocked entries"),
         ("Suppression Rate",f"{sup_rt}%",          COL_GRN, "Auto-suppressed without alert"),
-        ("Pending Review",  str(pending),          COL_ORG, "Monitor / Investigate items"),
+        ("白名單規則",      str(wl_count),         COL_BLU, "Known FP whitelist rules"),
     ]
 
     box_w = Cm(7.2)
@@ -522,7 +522,7 @@ def generate_pptx(stats: dict) -> bytes:
     _slide_distribution(prs, stats)
     _slide_top_signatures(prs, stats)
     _slide_events_table(prs, stats.get("block_events", []),
-                        "Blocked Events (EDL Candidates)", COL_RED)
+                        "封鎖建議事件 (Block-Recommended by Triage)", COL_RED)
     _slide_events_table(prs, stats.get("pending_events", []),
                         "Pending Review — Monitor / Investigate", COL_ORG)
     _slide_daily_trend(prs, stats)

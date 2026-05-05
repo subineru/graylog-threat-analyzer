@@ -14,9 +14,9 @@ const DashboardPage = ({stats,setPage,edlPending,whitelist,actionDist,dailyData,
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:14,padding:'16px 20px'}}>
         {[
           {label:'TOTAL EVENTS',    val:stats.total_events.toLocaleString(), sub:'Events processed in period', valColor:'var(--text)'},
-          {label:'BLOCKED',         val:stats.blocked,                        sub:'Confirmed threats (EDL candidates)', valColor:'var(--red)'},
+          {label:'BLOCKED',         val:stats.blocked,                        sub:'目前 EDL 封鎖條目',     valColor:'var(--red)'},
           {label:'SUPPRESSION RATE',val:stats.suppression_rate+'%',           sub:'Auto-handled without alert', valColor:'var(--green)'},
-          {label:'PENDING REVIEW',  val:stats.pending_review,                 sub:'Monitor + Investigate items', valColor:'var(--orange)'},
+          {label:'白名單規則',       val:whitelist.length,                     sub:'已知誤判白名單規則數',  valColor:'var(--blue)'},
         ].map(k=>(
           <div key={k.label} style={{background:'#fff',border:'1px solid var(--border)',borderRadius:6,padding:'18px 20px',display:'flex',flexDirection:'column',gap:6}}>
             <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.07em'}}>{k.label}</div>

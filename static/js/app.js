@@ -154,7 +154,7 @@ const App = () => {
   };
 
   /* ── Computed values ── */
-  const stats      = computeStats(summary, edlPending);
+  const stats      = computeStats(summary, edlPending, edlActive);
   const actionDist = computeActionDist(summary);
   const dailyData  = computeDailyData(summary);
   const topSigs    = computeTopSigs(summary);
