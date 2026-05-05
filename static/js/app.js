@@ -111,8 +111,10 @@ const App = () => {
   };
   const wlEdit = async (data) => {
     try {
-      // Delete by original sig_id first to avoid duplicates when sig_id changes
-      if (data.id) await fetch(`/whitelist/rule/${data.id}`, {method:'DELETE'});
+      if (data.id) {
+        const p = new URLSearchParams({src_ip: data._orig_src_ip ?? '', dst_ip: data._orig_dst_ip ?? ''});
+        await fetch(`/whitelist/rule/${data.id}?${p}`, {method:'DELETE'});
+      }
       await apiFetch('/whitelist/rule/direct', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
@@ -121,8 +123,11 @@ const App = () => {
     } catch(e) { console.error('wlEdit:', e); }
     await loadWhitelist();
   };
-  const wlDel = async (id) => {
-    try { await apiFetch(`/whitelist/rule/${id}`, {method:'DELETE'}); } catch(e) { console.error('wlDel:', e); }
+  const wlDel = async (id, src_ip='', dst_ip='') => {
+    try {
+      const p = new URLSearchParams({src_ip, dst_ip});
+      await apiFetch(`/whitelist/rule/${id}?${p}`, {method:'DELETE'});
+    } catch(e) { console.error('wlDel:', e); }
     await loadWhitelist();
   };
   const wlReload = async () => {

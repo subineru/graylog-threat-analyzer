@@ -387,12 +387,15 @@ async def whitelist_reload(request: Request):
 
 
 @app.delete("/whitelist/rule/{signature_id}")
-async def whitelist_remove_rule(signature_id: str, request: Request):
-    """
-    移除指定 signature_id 的白名單規則（即時生效，同步寫回 CSV）。
-    """
+async def whitelist_remove_rule(
+    signature_id: str,
+    request: Request,
+    src_ip: str = Query(""),
+    dst_ip: str = Query(""),
+):
+    """移除白名單規則。提供 src_ip/dst_ip 時精確匹配單條；否則移除該 sig_id 的全部規則。"""
     wl = request.app.state.triage.whitelist
-    ok = await wl.remove_rule(signature_id)
+    ok = await wl.remove_rule(signature_id, src_ip=src_ip, dst_ip=dst_ip)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Whitelist rule '{signature_id}' not found")
     return {"status": "removed", "signature_id": signature_id}
